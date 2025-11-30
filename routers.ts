@@ -5,7 +5,7 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, desc, and, like, or, sql } from "drizzle-orm";
-import { pacientes, consultas } from "../drizzle/schema";
+import { pacientes, consultas } from "./schema";
 import * as db from "./db";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
@@ -15,6 +15,59 @@ const drizzleDb = drizzle(connection);
 import { aiOrchestrator } from "./ai/orchestrator";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
+
+const PARAMETRO_ID_MAP: Record<string, number> = {
+  hemoglobina: 1,
+  rdw: 2,
+  leucocitos: 3,
+  leucocito: 3,
+  plaquetas: 4,
+  hematocrito: 5,
+  glicemia: 6,
+  hba1c: 7,
+  tsh: 8,
+  t4livre: 9,
+  creatinina: 10,
+  ureia: 11,
+};
+
+function normalizarSlug(valor: string) {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gi, "");
+}
+
+function gerarIdParametro(parametro: string, fallbackOffset: number = 1000) {
+  const slug = normalizarSlug(parametro);
+  const mapped = PARAMETRO_ID_MAP[slug as keyof typeof PARAMETRO_ID_MAP];
+  if (mapped) return mapped;
+
+  let hash = 0;
+  for (let i = 0; i < slug.length; i++) {
+    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0;
+  }
+  return fallbackOffset + (hash % 9000);
+}
+
+function normalizeResultados(resultados?: Array<any>) {
+  if (!resultados || resultados.length === 0) return [];
+
+  return resultados.map((resultado, index) => {
+    const parametro = resultado.parametro || resultado.nome || "";
+    const id = resultado.id ?? gerarIdParametro(parametro, 1000 + index);
+
+    return {
+      id,
+      parametro,
+      valor: resultado.valor ?? "",
+      unidade: resultado.unidade ?? "",
+      referencia: resultado.referencia ?? resultado.valorReferencia ?? "",
+      status: resultado.status ?? "normal",
+    };
+  });
+}
 
 // MÓDULO 10: BUSCA GLOBAL
 const buscaGlobalProcedure = protectedProcedure
@@ -886,6 +939,45 @@ REGRAS ADICIONAIS:
         return await db.getExamesByPaciente(input.pacienteId);
       }),
 
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        pacienteId: z.number(),
+        consultaId: z.number().optional(),
+        dataExame: z.date().optional(),
+        tipo: z.string().optional(),
+        laboratorio: z.string().optional(),
+        resultados: z.array(z.object({
+          id: z.number().optional(),
+          parametro: z.string(),
+          valor: z.string(),
+          unidade: z.string().optional(),
+          referencia: z.string().optional(),
+          status: z.enum(["normal", "alterado", "critico"]).optional(),
+        })).optional(),
+        pdfPath: z.string().optional(),
+        pdfUrl: z.string().optional(),
+        imagemPath: z.string().optional(),
+        imagemUrl: z.string().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
+        observacoes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, resultados, ...rest } = input;
+        const normalizedResultados = resultados ? normalizeResultados(resultados) : undefined;
+        return await db.updateExameLaboratorial(id, {
+          ...rest,
+          resultados: normalizedResultados,
+        });
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.deleteExameLaboratorial(input.id);
+      }),
+
     create: protectedProcedure
       .input(z.object({
         pacienteId: z.number(),
@@ -893,15 +985,27 @@ REGRAS ADICIONAIS:
         dataExame: z.date(),
         tipo: z.string().optional(),
         laboratorio: z.string().optional(),
-        resultados: z.any().optional(),
+        resultados: z.array(z.object({
+          id: z.number().optional(),
+          parametro: z.string(),
+          valor: z.string(),
+          unidade: z.string().optional(),
+          referencia: z.string().optional(),
+          status: z.enum(["normal", "alterado", "critico"]).optional(),
+        })).optional(),
         pdfPath: z.string().optional(),
         pdfUrl: z.string().optional(),
         imagemPath: z.string().optional(),
         imagemUrl: z.string().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
         observacoes: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        return await db.createExameLaboratorial(input);
+        return await db.createExameLaboratorial({
+          ...input,
+          resultados: normalizeResultados(input.resultados),
+        });
       }),
   }),
 
@@ -1123,28 +1227,43 @@ REGRAS ADICIONAIS:
         imageBlob: z.string(), // Base64 da imagem do exame
         pacienteId: z.number(),
         consultaId: z.number().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         try {
           // 1. Converter base64 para buffer
           const imageBuffer = Buffer.from(input.imageBlob, 'base64');
-          
+
           // 2. Upload para S3
-          const imageKey = `exames/${ctx.user.id}/${Date.now()}.jpg`;
-          const { url: imageUrl } = await storagePut(imageKey, imageBuffer, 'image/jpeg');
+          const contentType = input.mimeType || 'application/octet-stream';
+          const extensionFromName = input.fileName?.split('.').pop();
+          const normalizedExt = extensionFromName ? extensionFromName.toLowerCase() : 'bin';
+          const imageKey = `exames/${ctx.user.id}/${Date.now()}.${normalizedExt}`;
+          const { url: imageUrl } = await storagePut(imageKey, imageBuffer, contentType);
           
           // 3. Processar com IA
           const { ExamesLabService } = await import('./ai/services/exames');
-          const result = await ExamesLabService.process({ 
-            imageUrl, 
-            userId: ctx.user.id, 
-            patientId: input.pacienteId 
-          });
-          
-          if (!result.success) {
-            throw new Error(result.error || 'Erro ao processar exame');
+          const tentarProcessar = async () => {
+            const result = await ExamesLabService.process({
+              imageUrl,
+              userId: ctx.user.id,
+              patientId: input.pacienteId
+            });
+            if (!result.success) {
+              throw new Error(result.error || 'Erro ao processar exame');
+            }
+            return result;
+          };
+
+          let result;
+          try {
+            result = await tentarProcessar();
+          } catch (err) {
+            // Reprocessa uma segunda vez em caso de falha transitória
+            result = await tentarProcessar();
           }
-          
+
           // 4. Salvar no banco de dados
           const exame = await db.createExameLaboratorial({
             pacienteId: input.pacienteId,
@@ -1152,9 +1271,14 @@ REGRAS ADICIONAIS:
             dataExame: new Date(result.data!.dataColeta),
             tipo: result.data!.tipoExame,
             laboratorio: result.data!.laboratorio,
-            resultados: result.data!.valores,
+            resultados: normalizeResultados(result.data!.valores.map((valor) => ({
+              ...valor,
+              referencia: valor.valorReferencia,
+            }))),
             imagemPath: imageKey,
             imagemUrl: imageUrl,
+            mimeType: contentType,
+            fileName: input.fileName,
           });
           
           return {
