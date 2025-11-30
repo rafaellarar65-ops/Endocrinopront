@@ -45,6 +45,7 @@ export default function PacienteDetalhes() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConsultaDialogOpen, setIsConsultaDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [duracoesAudio, setDuracoesAudio] = useState<Record<number, number>>({});
 
   const { data: paciente, isLoading, refetch } = trpc.pacientes.getById.useQuery(
     { id: pacienteId },
@@ -118,14 +119,23 @@ export default function PacienteDetalhes() {
     const offset = -3; // UTC-3 (Brasília)
     const diff = offset * 60 + now.getTimezoneOffset();
     const brasiliaTime = new Date(now.getTime() + diff * 60 * 1000);
-    
+
     const year = brasiliaTime.getFullYear();
     const month = String(brasiliaTime.getMonth() + 1).padStart(2, '0');
     const day = String(brasiliaTime.getDate()).padStart(2, '0');
     const hours = String(brasiliaTime.getHours()).padStart(2, '0');
     const minutes = String(brasiliaTime.getMinutes()).padStart(2, '0');
-    
+
     return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  const formatarDuracao = (duracaoSegundos?: number) => {
+    if (!duracaoSegundos || Number.isNaN(duracaoSegundos)) return "--:--";
+    const minutos = Math.floor(duracaoSegundos / 60);
+    const segundos = Math.floor(duracaoSegundos % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${minutos}:${segundos}`;
   };
 
   const [consultaFormData, setConsultaFormData] = useState({
@@ -709,13 +719,26 @@ export default function PacienteDetalhes() {
                                       minute: "2-digit",
                                     })}
                                     {consulta.status ? ` • ${consulta.status}` : ""}
+                                    {duracoesAudio[consulta.id] &&
+                                      ` • Duração: ${formatarDuracao(duracoesAudio[consulta.id])}`}
                                   </CardDescription>
                                 </div>
                                 <Badge variant="outline">Áudio</Badge>
                               </div>
                             </CardHeader>
                             <CardContent className="space-y-3">
-                              <audio controls className="w-full" src={consulta.audioUrl || undefined} />
+                              <audio
+                                controls
+                                className="w-full"
+                                src={consulta.audioUrl || undefined}
+                                onLoadedMetadata={(event) => {
+                                  if (!Number.isFinite(event.currentTarget.duration)) return;
+                                  setDuracoesAudio((prev) => ({
+                                    ...prev,
+                                    [consulta.id]: event.currentTarget.duration,
+                                  }));
+                                }}
+                              />
                               <div className="flex items-center justify-between text-xs text-gray-600">
                                 <span className="flex items-center gap-2">
                                   <Volume2 className="h-4 w-4" />
@@ -834,14 +857,15 @@ export default function PacienteDetalhes() {
                                     data={serie.pontos.map((p) => ({ date: p.data, value: p.valor }))}
                                     label={serie.parametro}
                                     color={cor}
-                                    unit={serie.unidade || ""}
+                                    unit={serie.unidadeBase || serie.unidade || ""}
                                     title={`Evolução de ${serie.parametro}`}
+                                    warning={serie.avisoUnidade}
                                   />
                                   <div className="mt-3 text-xs text-gray-600 flex items-center gap-2">
                                     <TrendingUp className="h-4 w-4" />
                                     <span>
                                       Último valor: <strong>{ultimo.valor}</strong>
-                                      {serie.unidade ? ` ${serie.unidade}` : ""} em{" "}
+                                      {serie.unidadeBase ? ` ${serie.unidadeBase}` : ""} em{" "}
                                       {new Date(ultimo.data).toLocaleDateString("pt-BR")}
                                     </span>
                                   </div>

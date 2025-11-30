@@ -1244,16 +1244,26 @@ REGRAS ADICIONAIS:
           
           // 3. Processar com IA
           const { ExamesLabService } = await import('./ai/services/exames');
-          const result = await ExamesLabService.process({
-            imageUrl,
-            userId: ctx.user.id,
-            patientId: input.pacienteId
-          });
-          
-          if (!result.success) {
-            throw new Error(result.error || 'Erro ao processar exame');
+          const tentarProcessar = async () => {
+            const result = await ExamesLabService.process({
+              imageUrl,
+              userId: ctx.user.id,
+              patientId: input.pacienteId
+            });
+            if (!result.success) {
+              throw new Error(result.error || 'Erro ao processar exame');
+            }
+            return result;
+          };
+
+          let result;
+          try {
+            result = await tentarProcessar();
+          } catch (err) {
+            // Reprocessa uma segunda vez em caso de falha transitória
+            result = await tentarProcessar();
           }
-          
+
           // 4. Salvar no banco de dados
           const exame = await db.createExameLaboratorial({
             pacienteId: input.pacienteId,

@@ -45,4 +45,35 @@ describe("examesUtils", () => {
     expect(hemoglobina?.pontos[0].valor).toBe(13.2);
     expect(hemoglobina?.pontos[1].valor).toBe(13.8);
   });
+
+  it("converte unidades diferentes e sinaliza aviso", () => {
+    const series = montarSeriesEvolucao([
+      {
+        id: 1,
+        dataExame: "2024-01-01",
+        tipo: "Glicemia",
+        laboratorio: "Lab A",
+        resultados: [
+          { parametro: "Glicemia", valor: "5.5", unidade: "mmol/L" },
+        ],
+      },
+      {
+        id: 2,
+        dataExame: "2024-02-01",
+        tipo: "Glicemia",
+        laboratorio: "Lab B",
+        resultados: [
+          { parametro: "Glicemia", valor: "99", unidade: "mg/dL" },
+        ],
+      },
+    ]);
+
+    expect(series.length).toBe(1);
+    const glicemia = series[0];
+    expect(glicemia.unidadeBase).toBe("mg/dL");
+    expect(glicemia.avisoUnidade).toBeDefined();
+    // 5.5 mmol/L ~ 99 mg/dL, valores devem ficar próximos após conversão
+    expect(Math.round(glicemia.pontos[0].valor)).toBe(99);
+    expect(glicemia.pontos[1].valor).toBe(99);
+  });
 });

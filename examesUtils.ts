@@ -41,6 +41,51 @@ export function parseValorNumerico(valor?: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type UnidadeNormalizada = {
+  chave: string;
+  rotulo: string;
+};
+
+const UNIDADE_MAP: Record<string, UnidadeNormalizada> = {
+  "mg/dl": { chave: "mg/dl", rotulo: "mg/dL" },
+  "mg%": { chave: "mg/dl", rotulo: "mg/dL" },
+  "mmol/l": { chave: "mmol/l", rotulo: "mmol/L" },
+  "%": { chave: "%", rotulo: "%" },
+  "g/dl": { chave: "g/dl", rotulo: "g/dL" },
+};
+
+function normalizarUnidade(unidade?: string | null): UnidadeNormalizada | null {
+  if (!unidade) return null;
+  const normalized = unidade.toLowerCase().trim();
+  return UNIDADE_MAP[normalized] ?? { chave: normalized, rotulo: unidade };
+}
+
+const CONVERSOES_BASE: Record<string, (valor: number) => number> = {
+  // Conversões aproximadas para séries com misto de unidades
+  "mmol/l->mg/dl": (v) => v * 18,
+};
+
+function converterParaBase(valor: number, unidadeAtual: UnidadeNormalizada, unidadeBase: UnidadeNormalizada): {
+  valorConvertido: number;
+  aviso?: string;
+} {
+  if (unidadeAtual.chave === unidadeBase.chave) return { valorConvertido: valor };
+
+  const chaveConversao = `${unidadeAtual.chave}->${unidadeBase.chave}`;
+  const conversor = CONVERSOES_BASE[chaveConversao];
+  if (!conversor) {
+    return {
+      valorConvertido: valor,
+      aviso: `Valores possuem unidades diferentes (${unidadeAtual.rotulo} vs ${unidadeBase.rotulo}). Série exibida sem conversão precisa.`,
+    };
+  }
+
+  return {
+    valorConvertido: conversor(valor),
+    aviso: `Valores convertidos de ${unidadeAtual.rotulo} para ${unidadeBase.rotulo} (conversão aproximada).`,
+  };
+}
+
 export type ResultadoExame = {
   id?: number;
   parametro: string;
@@ -62,6 +107,8 @@ export type SerieEvolucao = {
   id: number;
   parametro: string;
   unidade?: string;
+  unidadeBase?: string;
+  avisoUnidade?: string;
   pontos: Array<{ data: string; valor: number; exameId: number; tipo?: string | null; laboratorio?: string | null }>;
 };
 
@@ -77,20 +124,32 @@ export function montarSeriesEvolucao(exames: ExameComResultados[]): SerieEvoluca
       if (valorNumerico === null) return;
 
       const parametroId = resultado.id ?? gerarParametroId(resultado.parametro, 2000 + index);
+      const unidadeNormalizada = normalizarUnidade(resultado.unidade);
       const atual = seriesMap.get(parametroId) ?? {
         id: parametroId,
         parametro: resultado.parametro,
-        unidade: resultado.unidade,
+        unidade: unidadeNormalizada?.rotulo ?? resultado.unidade,
+        unidadeBase: unidadeNormalizada?.rotulo ?? resultado.unidade,
         pontos: [],
       };
 
+      const unidadeBase = atual.unidadeBase ? normalizarUnidade(atual.unidadeBase) : unidadeNormalizada;
+      const conversao = unidadeBase && unidadeNormalizada
+        ? converterParaBase(valorNumerico, unidadeNormalizada, unidadeBase)
+        : { valorConvertido: valorNumerico };
+
       atual.pontos.push({
         data: data.toISOString(),
-        valor: valorNumerico,
+        valor: conversao.valorConvertido,
         exameId: exame.id,
         tipo: exame.tipo,
         laboratorio: exame.laboratorio,
       });
+
+      atual.unidadeBase = unidadeBase?.rotulo ?? atual.unidadeBase;
+      if (conversao.aviso) {
+        atual.avisoUnidade = conversao.aviso;
+      }
 
       seriesMap.set(parametroId, atual);
     });
