@@ -90,6 +90,8 @@ export const examesLaboratoriais = mysqlTable("examesLaboratoriais", {
   pdfUrl: varchar("pdfUrl", { length: 500 }), // URL do PDF
   imagemPath: varchar("imagemPath", { length: 500 }), // Caminho da imagem no S3
   imagemUrl: varchar("imagemUrl", { length: 500 }), // URL da imagem
+  mimeType: varchar("mimeType", { length: 255 }), // Tipo do arquivo enviado (PDF/Imagem)
+  fileName: varchar("fileName", { length: 255 }), // Nome original do arquivo
   observacoes: text("observacoes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

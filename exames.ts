@@ -1,6 +1,6 @@
-import { invokeLLM } from "../../_core/llm";
-import { getDb } from "../../db";
-import { aiAuditLogs } from "../../../drizzle/schema";
+import { invokeLLM } from "./_core/llm";
+import { getDb } from "./db";
+import { aiAuditLogs } from "./schema";
 
 export interface ExameLabData {
   tipoExame: string;

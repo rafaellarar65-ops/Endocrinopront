@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
-import { 
+import {
   ArrowLeft, 
   Calendar,
   Clock,
@@ -33,12 +33,14 @@ import {
 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { getLoginUrl } from "@/const";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExameResultadosTable } from "./ExameResultadosTable";
+import { gerarParametroId } from "./examesUtils";
 
 export default function ConsultaDetalhesV2() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
@@ -55,7 +57,11 @@ export default function ConsultaDetalhesV2() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFinalizando, setIsFinalizando] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [arquivoExame, setArquivoExame] = useState<File | null>(null);
+  const [isProcessandoExame, setIsProcessandoExame] = useState(false);
+  const [exameEmEdicaoId, setExameEmEdicaoId] = useState<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -90,6 +96,18 @@ export default function ConsultaDetalhesV2() {
     exameEspecifico: "",
   });
 
+  const [novoExame, setNovoExame] = useState({
+    tipo: "",
+    dataExame: "",
+    laboratorio: "",
+    pdfUrl: "",
+    imagemUrl: "",
+    observacoes: "",
+  });
+  const [resultadosDigitados, setResultadosDigitados] = useState([
+    { id: undefined as number | undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" as const },
+  ]);
+
   const { data: consulta, isLoading, refetch } = trpc.consultas.getById.useQuery(
     { id: consultaId },
     { enabled: isAuthenticated && consultaId > 0 }
@@ -104,6 +122,12 @@ export default function ConsultaDetalhesV2() {
     { pacienteId: consulta?.pacienteId || 0 },
     { enabled: isAuthenticated && !!consulta?.pacienteId }
   );
+
+  const { data: examesPaciente, isLoading: carregandoExames, refetch: refetchExamesPaciente } =
+    trpc.exames.getByPaciente.useQuery(
+      { pacienteId: consulta?.pacienteId || 0 },
+      { enabled: isAuthenticated && !!consulta?.pacienteId }
+    );
 
   const updateConsultaMutation = trpc.consultas.update.useMutation({
     onSuccess: () => {
@@ -163,12 +187,84 @@ export default function ConsultaDetalhesV2() {
     },
   });
 
+  const createExameMutation = trpc.exames.create.useMutation({
+    onSuccess: () => {
+      toast.success("Exame salvo com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      refetchExamesPaciente();
+      setExameEmEdicaoId(null);
+    },
+    onError: (error) => {
+      toast.error("Erro ao salvar exame: " + error.message);
+    },
+  });
+
+  const updateExameMutation = trpc.exames.update.useMutation({
+    onSuccess: () => {
+      toast.success("Exame atualizado com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      setExameEmEdicaoId(null);
+      refetchExamesPaciente();
+    },
+    onError: (error) => toast.error("Erro ao atualizar exame: " + error.message),
+  });
+
+  const deleteExameMutation = trpc.exames.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Exame removido");
+      refetchExamesPaciente();
+    },
+    onError: (error) => toast.error("Erro ao remover exame: " + error.message),
+  });
+
+  const processarExameLabMutation = trpc.ia.processarExameLab.useMutation({
+    onMutate: () => setIsProcessandoExame(true),
+    onSuccess: (result) => {
+      toast.success("Exame enviado para IA e salvo");
+      if (result?.dadosExtraidos) {
+        setNovoExame((prev) => ({
+          ...prev,
+          tipo: result.dadosExtraidos.tipoExame || prev.tipo,
+          laboratorio: result.dadosExtraidos.laboratorio || prev.laboratorio,
+          dataExame: result.dadosExtraidos.dataColeta || prev.dataExame,
+          imagemUrl: result.exame?.imagemUrl || prev.imagemUrl,
+        }));
+        const normalizados = (result.dadosExtraidos.valores || []).map((v: any, idx: number) => ({
+          id: v.id ?? gerarParametroId(v.parametro || "", 3000 + idx),
+          parametro: v.parametro,
+          valor: v.valor,
+          unidade: v.unidade,
+          referencia: v.valorReferencia,
+          status: v.status ?? "normal",
+        }));
+        setResultadosDigitados(normalizados.length ? normalizados : [{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+        refetchExamesPaciente();
+      }
+      setArquivoExame(null);
+      setIsProcessandoExame(false);
+    },
+    onError: (error) => {
+      toast.error("Erro ao processar exame: " + error.message);
+      setIsProcessandoExame(false);
+    },
+  });
+
+  const salvandoExame = createExameMutation.isPending || updateExameMutation.isPending || processarExameLabMutation.isPending;
+
+  const gerarResumoEvolutivoMutation = trpc.consultas.gerarResumoEvolutivo.useMutation({
+    onError: (error) => {
+      toast.error("Erro ao gerar resumo evolutivo: " + error.message);
+    },
+  });
+
   // Carregar dados da consulta quando disponível
   useEffect(() => {
     if (consulta) {
       if (consulta.anamnese) {
         try {
-          const anamneseData = typeof consulta.anamnese === 'string' 
+          const anamneseData = typeof consulta.anamnese === 'string'
             ? JSON.parse(consulta.anamnese) 
             : consulta.anamnese;
           setAnamnese(prev => ({ ...prev, ...anamneseData }));
@@ -186,8 +282,14 @@ export default function ConsultaDetalhesV2() {
           console.error("Erro ao parsear exame físico:", e);
         }
       }
+
+      if (!novoExame.dataExame && consulta.dataHora) {
+        const dataConsulta = new Date(consulta.dataHora);
+        const iso = dataConsulta.toISOString().split("T")[0];
+        setNovoExame((prev) => ({ ...prev, dataExame: iso }));
+      }
     }
-  }, [consulta]);
+  }, [consulta, novoExame.dataExame]);
 
   // Calcular IMC automaticamente
   useEffect(() => {
@@ -305,24 +407,147 @@ export default function ConsultaDetalhesV2() {
     }
   };
 
-  const handleFinalizarConsulta = () => {
+  const handleProcessarExameComIA = async () => {
+    if (!consulta?.pacienteId) {
+      toast.error("Paciente não encontrado para vincular o exame.");
+      return;
+    }
+
+    if (!arquivoExame) {
+      toast.error("Selecione um PDF ou imagem do exame.");
+      return;
+    }
+
+    const base64 = await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result?.toString().split(',')[1];
+        resolve(result || null);
+      };
+      reader.readAsDataURL(arquivoExame);
+    });
+
+    if (!base64) {
+      toast.error("Não foi possível ler o arquivo selecionado.");
+      return;
+    }
+
+    processarExameLabMutation.mutate({
+      imageBlob: base64,
+      pacienteId: consulta.pacienteId,
+      consultaId,
+      mimeType: arquivoExame.type || undefined,
+      fileName: arquivoExame.name,
+    });
+  };
+
+  const handleEditarExame = (exame: any) => {
+    setExameEmEdicaoId(exame.id);
+    setNovoExame({
+      tipo: exame.tipo || "",
+      dataExame: exame.dataExame ? new Date(exame.dataExame).toISOString().slice(0, 10) : "",
+      laboratorio: exame.laboratorio || "",
+      pdfUrl: exame.pdfUrl || "",
+      imagemUrl: exame.imagemUrl || "",
+      observacoes: exame.observacoes || "",
+    });
+    const resultadosNormalizados = Array.isArray(exame.resultados) && exame.resultados.length
+      ? exame.resultados.map((r: any, idx: number) => ({
+          id: r.id ?? gerarParametroId(r.parametro || "", 2000 + idx),
+          parametro: r.parametro || "",
+          valor: r.valor || "",
+          unidade: r.unidade || "",
+          referencia: r.referencia || "",
+          status: r.status || "normal",
+        }))
+      : [{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }];
+    setResultadosDigitados(resultadosNormalizados);
+  };
+
+  const handleRemoverExame = (id: number) => {
+    if (!window.confirm("Deseja remover este exame?")) return;
+    deleteExameMutation.mutate({ id });
+  };
+
+  const handleSalvarExame = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!consulta?.pacienteId) {
+      toast.error("Paciente não encontrado para vincular o exame.");
+      return;
+    }
+
+    if (!novoExame.dataExame) {
+      toast.error("Informe a data do exame.");
+      return;
+    }
+
+    const resultadosFiltrados = resultadosDigitados
+      .filter((r) => r.parametro && r.valor)
+      .map((r, idx) => ({
+        id: r.id ?? gerarParametroId(r.parametro, 2000 + idx),
+        parametro: r.parametro,
+        valor: r.valor,
+        unidade: r.unidade,
+        referencia: r.referencia,
+        status: r.status,
+      }));
+
+    const payloadBase = {
+      pacienteId: consulta.pacienteId,
+      consultaId,
+      dataExame: new Date(novoExame.dataExame),
+      tipo: novoExame.tipo || undefined,
+      laboratorio: novoExame.laboratorio || undefined,
+      observacoes: novoExame.observacoes || undefined,
+      resultados: resultadosFiltrados.length ? resultadosFiltrados : undefined,
+      pdfUrl: novoExame.pdfUrl || undefined,
+      imagemUrl: novoExame.imagemUrl || undefined,
+    };
+
+    if (exameEmEdicaoId) {
+      updateExameMutation.mutate({ ...payloadBase, id: exameEmEdicaoId });
+    } else {
+      createExameMutation.mutate(payloadBase);
+    }
+  };
+
+  const handleAddResultado = () => {
+    setResultadosDigitados((prev) => [...prev, { id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+  };
+
+  const handleUpdateResultado = (index: number, field: string, value: string) => {
+    setResultadosDigitados((prev) => prev.map((item, i) => {
+      if (i !== index) return item;
+      const parametroAtual = field === "parametro" ? value : item.parametro;
+      const id = item.id ?? gerarParametroId(parametroAtual, 1000 + index);
+      return { ...item, [field]: value, id };
+    }));
+  };
+
+  const handleRemoveResultado = (index: number) => {
+    setResultadosDigitados((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleFinalizarConsulta = async () => {
     if (!consulta) return;
-    
-    updateConsultaMutation.mutate(
-      {
+    setIsFinalizando(true);
+
+    try {
+      await gerarResumoEvolutivoMutation.mutateAsync({ consultaId });
+
+      await updateConsultaMutation.mutateAsync({
         id: consultaId,
         status: "concluida" as const,
-      },
-      {
-        onSuccess: () => {
-          toast.success("Consulta finalizada com sucesso!");
-          setLocation(`/pacientes/${consulta.pacienteId}`);
-        },
-        onError: (error) => {
-          toast.error("Erro ao finalizar consulta: " + error.message);
-        },
-      }
-    );
+      });
+
+      toast.success("Consulta finalizada com sucesso!");
+      setLocation(`/pacientes/${consulta.pacienteId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error("Erro ao finalizar consulta: " + message);
+    } finally {
+      setIsFinalizando(false);
+    }
   };
 
   const gerarReceituarioMutation = trpc.consultas.gerarReceituario.useMutation({
@@ -441,12 +666,20 @@ export default function ConsultaDetalhesV2() {
           </div>
           <div className="flex items-center gap-4">
             <CronometroConsulta inicioConsulta={consulta.status === "em_andamento" ? consulta.dataHora.toString() : null} />
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               size="sm"
               onClick={handleFinalizarConsulta}
+              disabled={isFinalizando || gerarResumoEvolutivoMutation.isPending}
             >
-              FINALIZAR
+              {isFinalizando ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Finalizando...
+                </>
+              ) : (
+                "FINALIZAR"
+              )}
             </Button>
           </div>
         </header>
@@ -671,64 +904,265 @@ export default function ConsultaDetalhesV2() {
             <AbaHipotesesConduta consultaId={consultaId} />
           )}
 
-          {abaAtiva === "perfil-met" && consulta?.pacienteId && (
-            <AbaPerfilMetabolico
-              consultaId={consultaId}
-              pacienteId={consulta.pacienteId}
-            />
-          )}
-
           {abaAtiva === "resumo" && (
             <AbaResumoEvolutivo consultaId={consultaId} />
           )}
 
-          {abaAtiva === "perfil-met" && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Perfil Metabólico</CardTitle>
-                  <Button variant="outline" size="sm">
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Atualizar com IA
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-600">Conteúdo da aba Perfil Metabólico...</p>
-              </CardContent>
-            </Card>
+          {abaAtiva === "perfil-met" && consulta && paciente && (
+            <AbaPerfilMetabolico consultaId={consultaId} pacienteId={consulta.pacienteId} />
           )}
 
           {abaAtiva === "exames" && (
             <Card>
               <CardHeader>
                 <CardTitle>Exames Laboratoriais</CardTitle>
-                <CardDescription>Upload e visualização de exames laboratoriais</CardDescription>
+                <CardDescription>Cadastro rápido e visualização dos exames do paciente</CardDescription>
+                {exameEmEdicaoId && (
+                  <div className="text-sm text-amber-600 font-medium">Editando exame #{exameEmEdicaoId} — salve ou cancele para sair do modo de edição</div>
+                )}
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                    <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">Upload de Exames</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Faça upload de PDFs ou imagens de exames laboratoriais para extração automática de dados
-                    </p>
-                    <Button variant="outline" onClick={() => toast.info("Funcionalidade em desenvolvimento")}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Fazer Upload de Exame
-                    </Button>
+              <CardContent className="space-y-6">
+                <form onSubmit={handleSalvarExame} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dataExame">Data do exame</Label>
+                      <Input
+                        id="dataExame"
+                        type="date"
+                        value={novoExame.dataExame}
+                        onChange={(e) => setNovoExame({ ...novoExame, dataExame: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="tipo">Tipo</Label>
+                      <Input
+                        id="tipo"
+                        placeholder="Ex: Perfil lipídico, HbA1c, TSH"
+                        value={novoExame.tipo}
+                        onChange={(e) => setNovoExame({ ...novoExame, tipo: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="laboratorio">Laboratório</Label>
+                      <Input
+                        id="laboratorio"
+                        placeholder="Nome do laboratório"
+                        value={novoExame.laboratorio}
+                        onChange={(e) => setNovoExame({ ...novoExame, laboratorio: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="pdfUrl">PDF ou link</Label>
+                      <Input
+                        id="pdfUrl"
+                        placeholder="URL para o PDF ou imagem do exame"
+                        value={novoExame.pdfUrl}
+                        onChange={(e) => setNovoExame({ ...novoExame, pdfUrl: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="arquivoExame">Upload para IA (imagem/PDF)</Label>
+                      <Input
+                        id="arquivoExame"
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={(e) => setArquivoExame(e.target.files?.[0] || null)}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!arquivoExame || isProcessandoExame}
+                          onClick={handleProcessarExameComIA}
+                        >
+                          {isProcessandoExame ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                          Enviar p/ IA
+                        </Button>
+                        {arquivoExame && <span className="text-xs text-gray-500 truncate">{arquivoExame.name}</span>}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="text-sm text-gray-500 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="font-semibold mb-2">💡 Próximas funcionalidades:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Upload de PDFs e imagens de exames</li>
-                      <li>Extração automática de valores com IA</li>
-                      <li>Tabela editável de resultados</li>
-                      <li>Gráficos de evolução temporal</li>
-                      <li>Comparação com exames anteriores</li>
-                    </ul>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-base">Resultados digitados</Label>
+                        <p className="text-xs text-gray-500">Preencha valores manualmente quando o PDF não estiver disponível</p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={handleAddResultado}>
+                        <Plus className="h-4 w-4 mr-2" /> Linha
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {resultadosDigitados.map((resultado, index) => (
+                        <div key={index} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end border border-dashed border-gray-200 p-3 rounded-lg">
+                          <div className="md:col-span-2 space-y-1">
+                            <Label className="text-xs">Parâmetro</Label>
+                            <Input
+                              placeholder="Ex: Glicemia de jejum"
+                              value={resultado.parametro}
+                              onChange={(e) => handleUpdateResultado(index, "parametro", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Valor</Label>
+                            <Input
+                              placeholder="Ex: 110"
+                              value={resultado.valor}
+                              onChange={(e) => handleUpdateResultado(index, "valor", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Unidade</Label>
+                            <Input
+                              placeholder="mg/dL"
+                              value={resultado.unidade}
+                              onChange={(e) => handleUpdateResultado(index, "unidade", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Referência</Label>
+                            <Input
+                              placeholder="70 - 99"
+                              value={resultado.referencia}
+                              onChange={(e) => handleUpdateResultado(index, "referencia", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Status</Label>
+                            <select
+                              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                              value={resultado.status}
+                              onChange={(e) => handleUpdateResultado(index, "status", e.target.value)}
+                            >
+                              <option value="normal">Normal</option>
+                              <option value="alterado">Alterado</option>
+                              <option value="critico">Crítico</option>
+                            </select>
+                          </div>
+                          {resultadosDigitados.length > 1 && (
+                            <div className="flex justify-end">
+                              <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveResultado(index)}>
+                                Remover
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="observacoes">Observações</Label>
+                    <Textarea
+                      id="observacoes"
+                      rows={3}
+                      placeholder="Valores relevantes, suspeitas ou observações livres"
+                      value={novoExame.observacoes}
+                      onChange={(e) => setNovoExame({ ...novoExame, observacoes: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    {exameEmEdicaoId && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setExameEmEdicaoId(null);
+                          setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+                          setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+                        }}
+                      >
+                        Cancelar edição
+                      </Button>
+                    )}
+                    <Button type="submit" disabled={salvandoExame}>
+                      {salvandoExame ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          {exameEmEdicaoId ? <CheckCircle className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                          {exameEmEdicaoId ? "Atualizar exame" : "Adicionar exame"}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </form>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gray-700">Histórico recente</h3>
+                    {carregandoExames && (
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Carregando
+                      </div>
+                    )}
+                  </div>
+
+                  {!examesPaciente || examesPaciente.length === 0 ? (
+                    <div className="text-center text-gray-500 py-6">
+                      Nenhum exame cadastrado para este paciente.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {examesPaciente.map((exame) => (
+                        <Card key={exame.id} className="border border-gray-200">
+                          <CardHeader className="pb-2">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <CardTitle className="text-base">{exame.tipo || "Exame"}</CardTitle>
+                                <CardDescription>
+                                  {new Date(exame.dataExame).toLocaleDateString("pt-BR")}
+                                  {exame.laboratorio ? ` • ${exame.laboratorio}` : ""}
+                                </CardDescription>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {exame.pdfUrl && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => exame.pdfUrl && window.open(exame.pdfUrl, "_blank")}
+                                  >
+                                    Ver arquivo
+                                  </Button>
+                                )}
+                                <Button variant="ghost" size="sm" onClick={() => handleEditarExame(exame)}>
+                                  Editar
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-600"
+                                  onClick={() => handleRemoverExame(exame.id)}
+                                >
+                                  Remover
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          {exame.observacoes && (
+                            <CardContent className="text-sm text-gray-700 whitespace-pre-line">
+                              {exame.observacoes}
+                            </CardContent>
+                          )}
+                          {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
+                            <ExameResultadosTable resultados={exame.resultados} compact />
+                          )}
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

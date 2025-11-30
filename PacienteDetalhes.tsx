@@ -17,17 +17,24 @@ import {
   Stethoscope,
   Plus,
   Clock,
-  MapPin
+  MapPin,
+  Volume2,
+  Download,
+  Paperclip,
+  ExternalLink
 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { getLoginUrl } from "@/const";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExameResultadosTable } from "./ExameResultadosTable";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
+import EvolutionChart from "./EvolutionChart";
+import { montarSeriesEvolucao } from "./examesUtils";
 
 export default function PacienteDetalhes() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
@@ -53,6 +60,8 @@ export default function PacienteDetalhes() {
     { pacienteId },
     { enabled: isAuthenticated && pacienteId > 0 }
   );
+
+  const seriesEvolucao = useMemo(() => montarSeriesEvolucao(exames ?? []), [exames]);
 
   const { data: bioimpedancias } = trpc.bioimpedancia.getByPaciente.useQuery(
     { pacienteId },
@@ -293,10 +302,11 @@ export default function PacienteDetalhes() {
 
         {/* Tabs */}
         <Tabs defaultValue="info" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="info">Informações</TabsTrigger>
             <TabsTrigger value="consultas">Consultas</TabsTrigger>
             <TabsTrigger value="exames">Exames</TabsTrigger>
+            <TabsTrigger value="audios">Áudios</TabsTrigger>
             <TabsTrigger value="bioimpedancia">Bioimpedância</TabsTrigger>
             <TabsTrigger value="documentos">Documentos</TabsTrigger>
             <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
@@ -647,6 +657,91 @@ export default function PacienteDetalhes() {
             </Card>
           </TabsContent>
 
+          {/* Aba Áudios */}
+          <TabsContent value="audios">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Áudios das Consultas</CardTitle>
+                    <CardDescription>Reproduza ou baixe os áudios associados às consultas</CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Volume2 className="h-4 w-4" />
+                    {consultas?.filter((c) => c.audioUrl)?.length || 0} áudios
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!consultas || consultas.length === 0 ? (
+                  <div className="text-center text-gray-500 py-10">
+                    Nenhuma consulta encontrada para este paciente.
+                  </div>
+                ) : (
+                  (() => {
+                    const consultasComAudio = consultas
+                      .filter((consulta) => !!consulta.audioUrl)
+                      .sort(
+                        (a, b) => new Date(b.dataHora).getTime() - new Date(a.dataHora).getTime()
+                      );
+
+                    if (consultasComAudio.length === 0) {
+                      return (
+                        <div className="text-center text-gray-500 py-10">
+                          Nenhum áudio disponível nas consultas registradas.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        {consultasComAudio.map((consulta) => (
+                          <Card key={consulta.id} className="border border-gray-200">
+                            <CardHeader className="pb-2">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <CardTitle className="text-base">
+                                    Consulta em {new Date(consulta.dataHora).toLocaleDateString("pt-BR")}
+                                  </CardTitle>
+                                  <CardDescription>
+                                    {new Date(consulta.dataHora).toLocaleTimeString("pt-BR", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                    {consulta.status ? ` • ${consulta.status}` : ""}
+                                  </CardDescription>
+                                </div>
+                                <Badge variant="outline">Áudio</Badge>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <audio controls className="w-full" src={consulta.audioUrl || undefined} />
+                              <div className="flex items-center justify-between text-xs text-gray-600">
+                                <span className="flex items-center gap-2">
+                                  <Volume2 className="h-4 w-4" />
+                                  Arquivo salvo no prontuário
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex items-center gap-2"
+                                  onClick={() => consulta.audioUrl && window.open(consulta.audioUrl, "_blank")}
+                                >
+                                  <Download className="h-4 w-4" />
+                                  Baixar
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    );
+                  })()
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Aba Exames */}
           <TabsContent value="exames">
             <Card>
@@ -692,8 +787,71 @@ export default function PacienteDetalhes() {
                             </div>
                           </div>
                         </CardHeader>
+                        {(exame.fileName || exame.pdfUrl || exame.imagemUrl) && (
+                          <div className="px-6 -mt-3 flex items-center gap-2 text-xs text-gray-600">
+                            <Paperclip className="h-4 w-4" />
+                            <span className="truncate">{exame.fileName || "Arquivo anexado"}</span>
+                            {(exame.pdfUrl || exame.imagemUrl) && (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="px-0 h-auto"
+                                onClick={() => window.open(exame.pdfUrl || exame.imagemUrl, "_blank")}
+                              >
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                Abrir
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
+                          <ExameResultadosTable resultados={exame.resultados} />
+                        )}
                       </Card>
                     ))}
+                    {seriesEvolucao.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-semibold text-gray-800">
+                            Evolução de parâmetros (exige ao menos 2 registros)
+                          </h4>
+                          <Badge variant="secondary">{seriesEvolucao.length} parâmetros</Badge>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-4">
+                          {seriesEvolucao.slice(0, 4).map((serie, idx) => {
+                            const ultimo = serie.pontos[serie.pontos.length - 1];
+                            const cores = ["#2563eb", "#16a34a", "#f59e0b", "#8b5cf6"];
+                            const cor = cores[idx % cores.length];
+
+                            return (
+                              <Card key={serie.id} className="border border-gray-100 shadow-sm">
+                                <CardHeader className="pb-2">
+                                  <CardTitle className="text-sm">{serie.parametro}</CardTitle>
+                                  {serie.unidade && <CardDescription>Unidade: {serie.unidade}</CardDescription>}
+                                </CardHeader>
+                                <CardContent>
+                                  <EvolutionChart
+                                    data={serie.pontos.map((p) => ({ date: p.data, value: p.valor }))}
+                                    label={serie.parametro}
+                                    color={cor}
+                                    unit={serie.unidade || ""}
+                                    title={`Evolução de ${serie.parametro}`}
+                                  />
+                                  <div className="mt-3 text-xs text-gray-600 flex items-center gap-2">
+                                    <TrendingUp className="h-4 w-4" />
+                                    <span>
+                                      Último valor: <strong>{ultimo.valor}</strong>
+                                      {serie.unidade ? ` ${serie.unidade}` : ""} em{" "}
+                                      {new Date(ultimo.data).toLocaleDateString("pt-BR")}
+                                    </span>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
