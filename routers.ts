@@ -5,7 +5,7 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, desc, and, like, or, sql } from "drizzle-orm";
-import { pacientes, consultas } from "../drizzle/schema";
+import { pacientes, consultas } from "./schema";
 import * as db from "./db";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
@@ -15,6 +15,60 @@ const drizzleDb = drizzle(connection);
 import { aiOrchestrator } from "./ai/orchestrator";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
+import { ESCORES_CATALOGO } from "./shared/escoresCatalogo";
+
+const PARAMETRO_ID_MAP: Record<string, number> = {
+  hemoglobina: 1,
+  rdw: 2,
+  leucocitos: 3,
+  leucocito: 3,
+  plaquetas: 4,
+  hematocrito: 5,
+  glicemia: 6,
+  hba1c: 7,
+  tsh: 8,
+  t4livre: 9,
+  creatinina: 10,
+  ureia: 11,
+};
+
+function normalizarSlug(valor: string) {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gi, "");
+}
+
+function gerarIdParametro(parametro: string, fallbackOffset: number = 1000) {
+  const slug = normalizarSlug(parametro);
+  const mapped = PARAMETRO_ID_MAP[slug as keyof typeof PARAMETRO_ID_MAP];
+  if (mapped) return mapped;
+
+  let hash = 0;
+  for (let i = 0; i < slug.length; i++) {
+    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0;
+  }
+  return fallbackOffset + (hash % 9000);
+}
+
+function normalizeResultados(resultados?: Array<any>) {
+  if (!resultados || resultados.length === 0) return [];
+
+  return resultados.map((resultado, index) => {
+    const parametro = resultado.parametro || resultado.nome || "";
+    const id = resultado.id ?? gerarIdParametro(parametro, 1000 + index);
+
+    return {
+      id,
+      parametro,
+      valor: resultado.valor ?? "",
+      unidade: resultado.unidade ?? "",
+      referencia: resultado.referencia ?? resultado.valorReferencia ?? "",
+      status: resultado.status ?? "normal",
+    };
+  });
+}
 
 // MÓDULO 10: BUSCA GLOBAL
 const buscaGlobalProcedure = protectedProcedure
@@ -228,9 +282,75 @@ export const appRouter = router({
         resumo: z.any().optional(),
         status: z.enum(["agendada", "em_andamento", "concluida", "cancelada"]).optional(),
       }))
-      .mutation(async ({ input }) => {
-        const { id, ...data } = input;
-        return await db.updateConsulta(id, data);
+      .mutation(async ({ input, ctx }) => {
+        const { id, status, ...data } = input;
+
+        const consultaAtual = await db.getConsultaById(id);
+        if (!consultaAtual) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Consulta não encontrada" });
+        }
+
+        const shouldFinalize =
+          status === "concluida" &&
+          (consultaAtual.status !== "concluida" || !consultaAtual.resumoEvolutivo);
+        const updatePayload: Record<string, any> = { ...data };
+
+        if (status) {
+          updatePayload.status = status;
+        }
+
+        if (shouldFinalize) {
+          const paciente = await db.getPacienteById(consultaAtual.pacienteId);
+          if (!paciente) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Paciente não encontrado" });
+          }
+
+          const consultasAnteriores = await drizzleDb
+            .select()
+            .from(consultas)
+            .where(
+              and(
+                eq(consultas.pacienteId, consultaAtual.pacienteId),
+                sql`${consultas.id} < ${consultaAtual.id}`
+              )
+            )
+            .orderBy(desc(consultas.dataHora))
+            .limit(1);
+
+          const ultimaConsulta = consultasAnteriores[0];
+          const resumoAnterior = ultimaConsulta?.resumoEvolutivo || null;
+
+          const anamnese = (data.anamnese ?? consultaAtual.anamnese) as any;
+          const exameFisico = (data.exameFisico ?? consultaAtual.exameFisico) as any;
+
+          const dadosConsulta = {
+            queixaPrincipal: anamnese?.queixaPrincipal,
+            historiaDoencaAtual: anamnese?.hda || anamnese?.historiaDoencaAtual,
+            antecedentesPessoais: anamnese?.antecedentesPessoais,
+            antecedentesFamiliares: anamnese?.antecedentesFamiliares,
+            exameFisico,
+            hipotesesDiagnosticas: data.hipotesesDiagnosticas ?? consultaAtual.hipotesesDiagnosticas ?? undefined,
+            conduta: data.conduta ?? consultaAtual.conduta ?? undefined,
+            observacoes: data.observacoes ?? consultaAtual.observacoes ?? undefined,
+          };
+
+          const { ResumoEvolutivoService } = await import("./ai/ResumoEvolutivoService");
+
+          const resultado = await ResumoEvolutivoService.gerarResumoConsolidado(
+            {
+              resumoAnterior,
+              dadosNovaConsulta: dadosConsulta,
+              pacienteNome: paciente.nome,
+              dataConsulta: new Date(consultaAtual.dataHora).toLocaleDateString("pt-BR"),
+            },
+            ctx.user.id
+          );
+
+          updatePayload.resumoEvolutivo = resultado.resumoConsolidado;
+        }
+
+        const updated = await db.updateConsulta(id, updatePayload);
+        return updated;
       }),
 
     generateSummary: protectedProcedure
@@ -327,6 +447,145 @@ export const appRouter = router({
         const sugestoes = await generateAbaSuggestions(input.aba, contexto);
 
         return sugestoes;
+      }),
+
+    // Sincronização consolidada em único chamado à IA
+    syncConsultaCompleta: protectedProcedure
+      .input(z.object({ consultaId: z.number() }))
+      .mutation(async ({ input }) => {
+        const consulta = await db.getConsultaById(input.consultaId);
+
+        if (!consulta) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Consulta não encontrada" });
+        }
+
+        const paciente = await db.getPacienteById(consulta.pacienteId);
+        const exames = await db.getExamesByPaciente(consulta.pacienteId);
+        const bioimpedancias = await db.getBioimpedanciasByPaciente(consulta.pacienteId);
+        const escores = await db.getEscoresByPaciente(consulta.pacienteId);
+
+        const prompt = `Você é um assistente clínico de Endocrinologia.
+Receba um pacote completo da consulta (HMA, exame físico, exames laboratoriais, bioimpedância, resumo prévio e escores já feitos) e devolva TODAS as respostas num único JSON com as chaves:
+- anamnese: objeto com campos textuais atualizados (queixaPrincipal, hda, historicoPatologico, medicamentosEmUso, alergias, historicoFamiliar, habitosVida)
+- exameFisico: objeto com campos atualizados (exameGeral, examePorSistemas ou exameEspecifico, sinais vitais se houver)
+- exames: { resultados: [ { id, parametro, valor, unidade, referencia, status } ], notas?: string }
+- escores: { sugeridos: [ { id, nome, categoria, motivoRelevancia, prioridade } ] }
+- perfilMetabolico: { indices: [ { id, nome, categoria, valorCalculado, unidade, interpretacao, dadosUtilizados } ] }
+- resumo: { markdown: string }
+- avisos: string[]
+
+Dados completos a seguir (pode responder "desconhecido" para campos faltantes):
+PACIENTE: ${paciente?.nome ?? "Desconhecido"} (${paciente?.sexo ?? "?"}), ${paciente?.dataNascimento ?? "sem data"}
+ANAMNESE: ${JSON.stringify(consulta.anamnese)}
+EXAME FÍSICO: ${JSON.stringify(consulta.exameFisico)}
+HIPÓTESES: ${consulta.hipotesesDiagnosticas ?? "não informadas"}
+CONDUTA: ${consulta.conduta ?? "não informada"}
+RESUMO ANTERIOR: ${consulta.resumoEvolutivo ?? "sem resumo"}
+EXAMES LABORATORIAIS (todos os pacotes): ${JSON.stringify(exames)}
+BIOIMPEDÂNCIA: ${JSON.stringify(bioimpedancias)}
+ESCORES REALIZADOS: ${JSON.stringify(escores)}
+`.trim();
+
+        const schema = z.object({
+          anamnese: z
+            .object({
+              queixaPrincipal: z.string().optional(),
+              hda: z.string().optional(),
+              historicoPatologico: z.string().optional(),
+              medicamentosEmUso: z.string().optional(),
+              alergias: z.string().optional(),
+              historicoFamiliar: z.string().optional(),
+              habitosVida: z.string().optional(),
+            })
+            .optional(),
+          exameFisico: z
+            .object({
+              exameGeral: z.string().optional(),
+              examePorSistemas: z.string().optional(),
+              exameEspecifico: z.string().optional(),
+              peso: z.string().optional(),
+              altura: z.string().optional(),
+              imc: z.string().optional(),
+              pressaoArterial: z.string().optional(),
+              frequenciaCardiaca: z.string().optional(),
+              temperatura: z.string().optional(),
+            })
+            .optional(),
+          exames: z
+            .object({
+              resultados: z
+                .array(
+                  z.object({
+                    id: z.number().optional(),
+                    parametro: z.string(),
+                    valor: z.string().optional(),
+                    unidade: z.string().optional(),
+                    referencia: z.string().optional(),
+                    status: z.string().optional(),
+                  })
+                )
+                .optional(),
+              notas: z.string().optional(),
+            })
+            .optional(),
+          escores: z
+            .object({
+              sugeridos: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    nome: z.string(),
+                    categoria: z.string().optional(),
+                    motivoRelevancia: z.string().optional(),
+                    prioridade: z.enum(["alta", "media", "baixa"]).optional(),
+                  })
+                )
+                .optional(),
+            })
+            .optional(),
+          perfilMetabolico: z
+            .object({
+              indices: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    nome: z.string(),
+                    categoria: z.string().optional(),
+                    valorCalculado: z.number().optional(),
+                    unidade: z.string().optional(),
+                    interpretacao: z.string().optional(),
+                    dadosUtilizados: z.array(z.string()).optional(),
+                  })
+                )
+                .optional(),
+            })
+            .optional(),
+          resumo: z.object({ markdown: z.string().optional() }).optional(),
+          avisos: z.array(z.string()).optional(),
+        });
+
+        const llmResponse = await invokeLLM({
+          messages: [{ role: "user", content: prompt }],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "pacote_consulta_completo",
+              strict: true,
+              schema: schema.toJSON(),
+            },
+          },
+        });
+
+        let parsed: any = {};
+        try {
+          parsed = schema.parse(JSON.parse(llmResponse.content));
+        } catch (error) {
+          parsed = {
+            avisos: ["Falha ao interpretar resposta da IA. Dados originais mantidos."],
+          };
+        }
+
+        return parsed;
       }),
 
     // MÓDULO 4: HIPÓTESES E CONDUTA
@@ -670,6 +929,7 @@ REGRAS ADICIONAIS:
           consultaId: z.number(),
           pacienteNome: z.string(),
           data: z.string(),
+          assinatura: z.enum(["digital", "manual"]).default("digital"),
           medicamentos: z.array(
             z.object({
               nome: z.string(),
@@ -694,6 +954,7 @@ REGRAS ADICIONAIS:
           {
             pacienteNome: input.pacienteNome,
             data: input.data,
+            assinaturaTipo: input.assinatura,
             medicamentos: input.medicamentos,
             instrucoesAdicionais: input.instrucoesAdicionais,
           },
@@ -886,6 +1147,45 @@ REGRAS ADICIONAIS:
         return await db.getExamesByPaciente(input.pacienteId);
       }),
 
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        pacienteId: z.number(),
+        consultaId: z.number().optional(),
+        dataExame: z.date().optional(),
+        tipo: z.string().optional(),
+        laboratorio: z.string().optional(),
+        resultados: z.array(z.object({
+          id: z.number().optional(),
+          parametro: z.string(),
+          valor: z.string(),
+          unidade: z.string().optional(),
+          referencia: z.string().optional(),
+          status: z.enum(["normal", "alterado", "critico"]).optional(),
+        })).optional(),
+        pdfPath: z.string().optional(),
+        pdfUrl: z.string().optional(),
+        imagemPath: z.string().optional(),
+        imagemUrl: z.string().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
+        observacoes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, resultados, ...rest } = input;
+        const normalizedResultados = resultados ? normalizeResultados(resultados) : undefined;
+        return await db.updateExameLaboratorial(id, {
+          ...rest,
+          resultados: normalizedResultados,
+        });
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.deleteExameLaboratorial(input.id);
+      }),
+
     create: protectedProcedure
       .input(z.object({
         pacienteId: z.number(),
@@ -893,15 +1193,27 @@ REGRAS ADICIONAIS:
         dataExame: z.date(),
         tipo: z.string().optional(),
         laboratorio: z.string().optional(),
-        resultados: z.any().optional(),
+        resultados: z.array(z.object({
+          id: z.number().optional(),
+          parametro: z.string(),
+          valor: z.string(),
+          unidade: z.string().optional(),
+          referencia: z.string().optional(),
+          status: z.enum(["normal", "alterado", "critico"]).optional(),
+        })).optional(),
         pdfPath: z.string().optional(),
         pdfUrl: z.string().optional(),
         imagemPath: z.string().optional(),
         imagemUrl: z.string().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
         observacoes: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        return await db.createExameLaboratorial(input);
+        return await db.createExameLaboratorial({
+          ...input,
+          resultados: normalizeResultados(input.resultados),
+        });
       }),
   }),
 
@@ -937,6 +1249,29 @@ REGRAS ADICIONAIS:
       .input(z.object({ pacienteId: z.number() }))
       .query(async ({ input }) => {
         return await db.getEscoresByPaciente(input.pacienteId);
+      }),
+
+    buscarCatalogo: protectedProcedure
+      .input(
+        z.object({
+          termo: z.string().optional(),
+          limit: z.number().default(15),
+        })
+      )
+      .query(({ input }) => {
+        const termo = input.termo?.trim().toLowerCase();
+        const base = ESCORES_CATALOGO;
+
+        if (!termo) {
+          return base.slice(0, input.limit);
+        }
+
+        return base
+          .filter((item) => {
+            const alvo = `${item.nome} ${item.categoria} ${item.descricao}`.toLowerCase();
+            return alvo.includes(termo);
+          })
+          .slice(0, input.limit);
       }),
 
     create: protectedProcedure
@@ -1123,28 +1458,43 @@ REGRAS ADICIONAIS:
         imageBlob: z.string(), // Base64 da imagem do exame
         pacienteId: z.number(),
         consultaId: z.number().optional(),
+        mimeType: z.string().optional(),
+        fileName: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         try {
           // 1. Converter base64 para buffer
           const imageBuffer = Buffer.from(input.imageBlob, 'base64');
-          
+
           // 2. Upload para S3
-          const imageKey = `exames/${ctx.user.id}/${Date.now()}.jpg`;
-          const { url: imageUrl } = await storagePut(imageKey, imageBuffer, 'image/jpeg');
+          const contentType = input.mimeType || 'application/octet-stream';
+          const extensionFromName = input.fileName?.split('.').pop();
+          const normalizedExt = extensionFromName ? extensionFromName.toLowerCase() : 'bin';
+          const imageKey = `exames/${ctx.user.id}/${Date.now()}.${normalizedExt}`;
+          const { url: imageUrl } = await storagePut(imageKey, imageBuffer, contentType);
           
           // 3. Processar com IA
           const { ExamesLabService } = await import('./ai/services/exames');
-          const result = await ExamesLabService.process({ 
-            imageUrl, 
-            userId: ctx.user.id, 
-            patientId: input.pacienteId 
-          });
-          
-          if (!result.success) {
-            throw new Error(result.error || 'Erro ao processar exame');
+          const tentarProcessar = async () => {
+            const result = await ExamesLabService.process({
+              imageUrl,
+              userId: ctx.user.id,
+              patientId: input.pacienteId
+            });
+            if (!result.success) {
+              throw new Error(result.error || 'Erro ao processar exame');
+            }
+            return result;
+          };
+
+          let result;
+          try {
+            result = await tentarProcessar();
+          } catch (err) {
+            // Reprocessa uma segunda vez em caso de falha transitória
+            result = await tentarProcessar();
           }
-          
+
           // 4. Salvar no banco de dados
           const exame = await db.createExameLaboratorial({
             pacienteId: input.pacienteId,
@@ -1152,9 +1502,14 @@ REGRAS ADICIONAIS:
             dataExame: new Date(result.data!.dataColeta),
             tipo: result.data!.tipoExame,
             laboratorio: result.data!.laboratorio,
-            resultados: result.data!.valores,
+            resultados: normalizeResultados(result.data!.valores.map((valor) => ({
+              ...valor,
+              referencia: valor.valorReferencia,
+            }))),
             imagemPath: imageKey,
             imagemUrl: imageUrl,
+            mimeType: contentType,
+            fileName: input.fileName,
           });
           
           return {
@@ -1350,13 +1705,22 @@ Com base nas informações abaixo da consulta, sugira melhorias para o EXAME FÍ
 Retorne um JSON com um array chamado "sugestoes", onde cada item tem:
 {
   "id": "string",
-  "tipo": "exame_geral" | "exame_sistemas",
+  "tipo": "exame_geral" | "exame_sistemas" | "exame_especifico",
   "titulo": "string",
   "textoSugerido": "string",
   "fundamentacao": "string",
   "prioridade": "alta" | "media" | "baixa",
-  "pontosAtencao": ["string", ...]
+  "pontosAtencao": ["string", ...],
+  "campos": [
+    {
+      "id": "string",
+      "label": "string",
+      "placeholder": "string"
+    }
+  ]
 }
+
+Quando "tipo" for "exame_especifico", descreva claramente qual teste/avaliação deve ser feito e forneça pelo menos um campo em "campos" para que o médico possa preencher o resultado do exame sugerido.
         `.trim();
 
         const llmResponse = await invokeLLM({
@@ -1375,14 +1739,38 @@ Retorne um JSON com um array chamado "sugestoes", onde cada item tem:
                       type: "object",
                       properties: {
                         id: { type: "string" },
-                        tipo: { type: "string", enum: ["exame_geral", "exame_sistemas"] },
+                        tipo: {
+                          type: "string",
+                          enum: ["exame_geral", "exame_sistemas", "exame_especifico"],
+                        },
                         titulo: { type: "string" },
                         textoSugerido: { type: "string" },
                         fundamentacao: { type: "string" },
                         prioridade: { type: "string", enum: ["alta", "media", "baixa"] },
                         pontosAtencao: { type: "array", items: { type: "string" } },
+                        campos: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            properties: {
+                              id: { type: "string" },
+                              label: { type: "string" },
+                              placeholder: { type: "string" },
+                            },
+                            required: ["label"],
+                            additionalProperties: false,
+                          },
+                          nullable: true,
+                        },
                       },
-                      required: ["id", "tipo", "titulo", "textoSugerido", "fundamentacao", "prioridade"],
+                      required: [
+                        "id",
+                        "tipo",
+                        "titulo",
+                        "textoSugerido",
+                        "fundamentacao",
+                        "prioridade",
+                      ],
                       additionalProperties: false,
                     },
                   },
