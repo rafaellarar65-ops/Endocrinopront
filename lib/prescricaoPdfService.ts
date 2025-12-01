@@ -1,4 +1,8 @@
-import { fillReceituarioSVG, type ReceituarioData } from "../svgProcessor";
+import {
+  convertSVGtoPDF,
+  fillReceituarioSVG,
+  type ReceituarioData,
+} from "../svgProcessor";
 
 export interface PrescricaoItem {
   nome: string;
@@ -22,7 +26,7 @@ export interface PrescricaoPdfDependencies {
 
 export async function gerarPrescricaoPdf(
   params: GerarPrescricaoPdfParams,
-  deps: PrescricaoPdfDependencies
+  deps: PrescricaoPdfDependencies = { converter: convertSVGtoPDF }
 ): Promise<{ pdfBuffer: Buffer; html: string }> {
   const receituarioData: ReceituarioData = {
     nomePaciente: params.pacienteNome,

@@ -7,7 +7,6 @@ import {
   convertSVGtoPDF,
   type BioimpedanciaData,
 } from "./svgProcessor";
-import { storagePut } from "./storage";
 import { gerarPrescricaoPdf } from "./lib/prescricaoPdfService";
 
 export interface GenerateReceituarioParams {
@@ -101,12 +100,9 @@ export async function generateReceituarioPDF(
   const fileName = `receituario-${pacienteId}-${timestamp}.pdf`;
   const fileKey = `documentos/${pacienteId}/${fileName}`;
 
-  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+  const { pdfUrl, pdfPath } = await uploadPdfBuffer(fileKey, pdfBuffer);
 
-  return {
-    pdfUrl,
-    pdfPath: fileKey,
-  };
+  return { pdfUrl, pdfPath };
 }
 
 /**
@@ -155,10 +151,7 @@ export async function generateBioimpedanciaPDF(
   const fileName = `bioimpedancia-${pacienteId}-${timestamp}.pdf`;
   const fileKey = `documentos/${pacienteId}/${fileName}`;
 
-  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+  const { pdfUrl, pdfPath } = await uploadPdfBuffer(fileKey, pdfBuffer);
 
-  return {
-    pdfUrl,
-    pdfPath: fileKey,
-  };
+  return { pdfUrl, pdfPath };
 }
