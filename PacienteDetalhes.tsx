@@ -23,6 +23,9 @@ import {
   Paperclip,
   ExternalLink,
   Send,
+  PencilLine,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { getLoginUrl } from "@/const";
@@ -35,7 +38,7 @@ import { ExameResultadosTable } from "./ExameResultadosTable";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import EvolutionChart from "./EvolutionChart";
-import { montarSeriesEvolucao } from "./examesUtils";
+import { gerarParametroId, montarSeriesEvolucao } from "./examesUtils";
 import { gerarDashboardMetabolico, gerarPlanoDual, PlanoTemplate, PlanoVersao } from "./shared/pendenciasEmFoco";
 
 const DIA_EM_MS = 24 * 60 * 60 * 1000;
@@ -98,6 +101,20 @@ export default function PacienteDetalhes() {
   const [isConsultaDialogOpen, setIsConsultaDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [duracoesAudio, setDuracoesAudio] = useState<Record<number, number>>({});
+  const [isExameDialogOpen, setIsExameDialogOpen] = useState(false);
+  const [exameEmEdicaoId, setExameEmEdicaoId] = useState<number | null>(null);
+  const [mostrarTabelaEditavel, setMostrarTabelaEditavel] = useState(false);
+  const [novoExame, setNovoExame] = useState({
+    tipo: "",
+    dataExame: "",
+    laboratorio: "",
+    pdfUrl: "",
+    imagemUrl: "",
+    observacoes: "",
+  });
+  const [resultadosDigitados, setResultadosDigitados] = useState([
+    { id: undefined as number | undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" },
+  ]);
 
   const { data: paciente, isLoading, refetch } = trpc.pacientes.getById.useQuery(
     { id: pacienteId },
@@ -109,7 +126,7 @@ export default function PacienteDetalhes() {
     { enabled: isAuthenticated && pacienteId > 0 }
   );
 
-  const { data: exames } = trpc.exames.getByPaciente.useQuery(
+  const { data: exames, refetch: refetchExames } = trpc.exames.getByPaciente.useQuery(
     { pacienteId },
     { enabled: isAuthenticated && pacienteId > 0 }
   );
@@ -306,6 +323,108 @@ export default function PacienteDetalhes() {
     );
   };
 
+  const handleAbrirNovoExame = () => {
+    setExameEmEdicaoId(null);
+    setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+    setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+    setMostrarTabelaEditavel(true);
+    setIsExameDialogOpen(true);
+  };
+
+  const handleEditarExame = (exame: any) => {
+    setExameEmEdicaoId(exame.id);
+    setNovoExame({
+      tipo: exame.tipo || "",
+      dataExame: exame.dataExame ? new Date(exame.dataExame).toISOString().slice(0, 16) : "",
+      laboratorio: exame.laboratorio || "",
+      pdfUrl: exame.pdfUrl || "",
+      imagemUrl: exame.imagemUrl || "",
+      observacoes: exame.observacoes || "",
+    });
+    const resultadosNormalizados = Array.isArray(exame.resultados) && exame.resultados.length
+      ? exame.resultados.map((r: any, idx: number) => ({
+          id: r.id ?? gerarParametroId(r.parametro || "", 2000 + idx),
+          parametro: r.parametro || "",
+          valor: r.valor || "",
+          unidade: r.unidade || "",
+          referencia: r.referencia || "",
+          status: r.status || "normal",
+        }))
+      : [{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }];
+
+    setResultadosDigitados(resultadosNormalizados);
+    setMostrarTabelaEditavel(true);
+    setIsExameDialogOpen(true);
+  };
+
+  const handleRemoverExame = (id: number) => {
+    if (!window.confirm("Deseja remover este exame e atualizar a evolução?")) return;
+    deleteExameMutation.mutate({ id });
+  };
+
+  const handleSalvarExame = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!pacienteId) {
+      toast.error("Paciente não encontrado para vincular o exame.");
+      return;
+    }
+
+    if (!novoExame.dataExame) {
+      toast.error("Informe a data do exame.");
+      return;
+    }
+
+    const resultadosFiltrados = resultadosDigitados
+      .filter((r) => r.parametro && r.valor)
+      .map((r, idx) => ({
+        id: r.id ?? gerarParametroId(r.parametro, 2000 + idx),
+        parametro: r.parametro,
+        valor: r.valor,
+        unidade: r.unidade,
+        referencia: r.referencia,
+        status: r.status,
+      }));
+
+    const payloadBase = {
+      pacienteId,
+      dataExame: new Date(novoExame.dataExame),
+      tipo: novoExame.tipo || undefined,
+      laboratorio: novoExame.laboratorio || undefined,
+      observacoes: novoExame.observacoes || undefined,
+      resultados: resultadosFiltrados.length ? resultadosFiltrados : undefined,
+      pdfUrl: novoExame.pdfUrl || undefined,
+      imagemUrl: novoExame.imagemUrl || undefined,
+    };
+
+    if (exameEmEdicaoId) {
+      updateExameMutation.mutate({ ...payloadBase, id: exameEmEdicaoId });
+    } else {
+      createExameMutation.mutate(payloadBase);
+    }
+  };
+
+  const handleAddResultado = () => {
+    setMostrarTabelaEditavel(true);
+    setResultadosDigitados((prev) => [...prev, { id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+  };
+
+  const handleUpdateResultado = (index: number, field: string, value: string) => {
+    setResultadosDigitados((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const parametroAtual = field === "parametro" ? value : item.parametro;
+        const id = item.id ?? gerarParametroId(parametroAtual, 1000 + index);
+        return { ...item, [field]: value, id };
+      })
+    );
+  };
+
+  const handleRemoveResultado = (index: number) => {
+    setResultadosDigitados((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const salvandoExame = createExameMutation.isPending || updateExameMutation.isPending;
+
   const adicionarMeta = () => {
     if (!novaMeta.trim()) return;
     setMetasPlano((prev) => [...prev, novaMeta.trim()]);
@@ -404,6 +523,38 @@ export default function PacienteDetalhes() {
       })),
     [indicadores]
   );
+
+  const createExameMutation = trpc.exames.create.useMutation({
+    onSuccess: () => {
+      toast.success("Exame salvo com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      setExameEmEdicaoId(null);
+      setIsExameDialogOpen(false);
+      refetchExames();
+    },
+    onError: (error) => toast.error("Erro ao salvar exame: " + error.message),
+  });
+
+  const updateExameMutation = trpc.exames.update.useMutation({
+    onSuccess: () => {
+      toast.success("Exame atualizado com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      setExameEmEdicaoId(null);
+      setIsExameDialogOpen(false);
+      refetchExames();
+    },
+    onError: (error) => toast.error("Erro ao atualizar exame: " + error.message),
+  });
+
+  const deleteExameMutation = trpc.exames.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Exame removido");
+      refetchExames();
+    },
+    onError: (error) => toast.error("Erro ao remover exame: " + error.message),
+  });
 
   const updateMutation = trpc.pacientes.update.useMutation({
     onSuccess: () => {
@@ -673,121 +824,286 @@ export default function PacienteDetalhes() {
           </TabsContent>
 
           {/* Aba Exames */}
-          <TabsContent value="exames">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Exames Laboratoriais</CardTitle>
-                    <CardDescription>Histórico de exames e resultados</CardDescription>
-                  </div>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Adicionar Exame
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!exames || exames.length === 0 ? (
-                  <div className="text-center py-12">
-                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 mb-4">Nenhum exame registrado</p>
-                    <Button>
+          <Dialog open={isExameDialogOpen} onOpenChange={setIsExameDialogOpen}>
+            <TabsContent value="exames">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Exames Laboratoriais</CardTitle>
+                      <CardDescription>Histórico de exames e resultados</CardDescription>
+                    </div>
+                    <Button onClick={handleAbrirNovoExame}>
                       <Plus className="h-4 w-4 mr-2" />
-                      Adicionar Primeiro Exame
+                      Adicionar Exame
                     </Button>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {exames.map((exame) => (
-                      <Card key={exame.id} className="hover:shadow-md transition-shadow">
-                        <CardHeader>
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 rounded-lg bg-cyan-100 flex items-center justify-center">
-                                <FileText className="h-5 w-5 text-cyan-600" />
+                </CardHeader>
+                <CardContent>
+                  {!exames || exames.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-600 mb-4">Nenhum exame registrado</p>
+                      <Button onClick={handleAbrirNovoExame}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Adicionar Primeiro Exame
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {exames.map((exame) => (
+                        <Card key={exame.id} className="hover:shadow-md transition-shadow">
+                          <CardHeader>
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-lg bg-cyan-100 flex items-center justify-center">
+                                  <FileText className="h-5 w-5 text-cyan-600" />
+                                </div>
+                                <div>
+                                  <CardTitle className="text-base">{exame.tipo || 'Exame'}</CardTitle>
+                                  <CardDescription>
+                                    {new Date(exame.dataExame).toLocaleDateString('pt-BR')}
+                                    {exame.laboratorio && ` • ${exame.laboratorio}`}
+                                  </CardDescription>
+                                </div>
                               </div>
-                              <div>
-                                <CardTitle className="text-base">{exame.tipo || 'Exame'}</CardTitle>
-                                <CardDescription>
-                                  {new Date(exame.dataExame).toLocaleDateString('pt-BR')}
-                                  {exame.laboratorio && ` • ${exame.laboratorio}`}
-                                </CardDescription>
+                              <div className="flex gap-2">
+                                <Button variant="ghost" size="sm" onClick={() => handleEditarExame(exame)}>
+                                  <PencilLine className="h-4 w-4 mr-1" />
+                                  Editar
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleRemoverExame(exame.id)}>
+                                  <Trash2 className="h-4 w-4 mr-1 text-red-500" />
+                                  Remover
+                                </Button>
                               </div>
                             </div>
+                          </CardHeader>
+                          {(exame.fileName || exame.pdfUrl || exame.imagemUrl) && (
+                            <div className="px-6 -mt-3 flex items-center gap-2 text-xs text-gray-600">
+                              <Paperclip className="h-4 w-4" />
+                              <span className="truncate">{exame.fileName || "Arquivo anexado"}</span>
+                              {(exame.pdfUrl || exame.imagemUrl) && (
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="px-0 h-auto"
+                                  onClick={() => window.open(exame.pdfUrl || exame.imagemUrl, "_blank")}
+                                >
+                                  <ExternalLink className="h-4 w-4 mr-1" />
+                                  Abrir
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                          {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
+                            <ExameResultadosTable resultados={exame.resultados} />
+                          )}
+                        </Card>
+                      ))}
+                      {seriesEvolucao.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-semibold text-gray-800">
+                              Evolução de parâmetros (exige ao menos 2 registros)
+                            </h4>
+                            <Badge variant="secondary">{seriesEvolucao.length} parâmetros</Badge>
                           </div>
-                        </CardHeader>
-                        {(exame.fileName || exame.pdfUrl || exame.imagemUrl) && (
-                          <div className="px-6 -mt-3 flex items-center gap-2 text-xs text-gray-600">
-                            <Paperclip className="h-4 w-4" />
-                            <span className="truncate">{exame.fileName || "Arquivo anexado"}</span>
-                            {(exame.pdfUrl || exame.imagemUrl) && (
+                          <div className="grid md:grid-cols-2 gap-4">
+                            {seriesEvolucao.slice(0, 4).map((serie, idx) => {
+                              const ultimo = serie.pontos[serie.pontos.length - 1];
+                              const cores = ["#2563eb", "#16a34a", "#f59e0b", "#8b5cf6"];
+                              const cor = cores[idx % cores.length];
+
+                              return (
+                                <Card key={serie.id} className="border border-gray-100 shadow-sm">
+                                  <CardHeader className="pb-2">
+                                    <CardTitle className="text-sm">{serie.parametro}</CardTitle>
+                                    {serie.unidade && <CardDescription>Unidade: {serie.unidade}</CardDescription>}
+                                  </CardHeader>
+                                  <CardContent className="pt-0">
+                                    <div className="flex items-center gap-3 text-sm">
+                                      <div
+                                        className="h-12 w-12 rounded-full flex items-center justify-center text-white"
+                                        style={{ backgroundColor: cor }}
+                                      >
+                                        {ultimo?.valor?.toFixed(1)}
+                                      </div>
+                                      <div className="text-gray-700">
+                                        <div>
+                                          Último: {ultimo?.valor?.toFixed(2)} {serie.unidadeBase || serie.unidade}
+                                        </div>
+                                        <div className="text-xs text-gray-500">{new Date(ultimo.data).toLocaleDateString("pt-BR")}</div>
+                                        {serie.avisoUnidade && (
+                                          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1 mt-1">
+                                            {serie.avisoUnidade}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>{exameEmEdicaoId ? "Editar pacote de exames" : "Novo pacote de exames"}</DialogTitle>
+                <DialogDescription>
+                  Cadastre resultados digitados, arquivos e metadados. IDs determinísticos são gerados para manter a evolução.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSalvarExame} className="space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Tipo</Label>
+                    <Input
+                      placeholder="Hemograma, perfil lipídico..."
+                      value={novoExame.tipo}
+                      onChange={(e) => setNovoExame((prev) => ({ ...prev, tipo: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <Label>Data do exame</Label>
+                    <Input
+                      type="datetime-local"
+                      value={novoExame.dataExame}
+                      onChange={(e) => setNovoExame((prev) => ({ ...prev, dataExame: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label>Laboratório</Label>
+                    <Input
+                      placeholder="Laboratório ou origem"
+                      value={novoExame.laboratorio}
+                      onChange={(e) => setNovoExame((prev) => ({ ...prev, laboratorio: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-2">
+                    <div>
+                      <Label>PDF/URL</Label>
+                      <Input
+                        placeholder="https://..."
+                        value={novoExame.pdfUrl}
+                        onChange={(e) => setNovoExame((prev) => ({ ...prev, pdfUrl: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label>Imagem/URL</Label>
+                      <Input
+                        placeholder="https://..."
+                        value={novoExame.imagemUrl}
+                        onChange={(e) => setNovoExame((prev) => ({ ...prev, imagemUrl: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Observações</Label>
+                    <Textarea
+                      value={novoExame.observacoes}
+                      onChange={(e) => setNovoExame((prev) => ({ ...prev, observacoes: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Resultados digitados</Label>
+                      <p className="text-xs text-gray-500">IDs estáveis são atribuídos automaticamente para alinhar deltas e gráficos.</p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={handleAddResultado}>
+                      <Plus className="h-4 w-4 mr-1" /> Adicionar parâmetro
+                    </Button>
+                  </div>
+                  {mostrarTabelaEditavel && (
+                    <div className="space-y-3">
+                      {resultadosDigitados.map((resultado, index) => (
+                        <div key={resultado.id ?? index} className="grid md:grid-cols-6 gap-2 items-end">
+                          <div className="md:col-span-2">
+                            <Label>Parâmetro</Label>
+                            <Input
+                              value={resultado.parametro}
+                              onChange={(e) => handleUpdateResultado(index, "parametro", e.target.value)}
+                              placeholder="Glicemia, HbA1c..."
+                            />
+                          </div>
+                          <div>
+                            <Label>Valor</Label>
+                            <Input
+                              value={resultado.valor}
+                              onChange={(e) => handleUpdateResultado(index, "valor", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label>Unidade</Label>
+                            <Input
+                              value={resultado.unidade}
+                              onChange={(e) => handleUpdateResultado(index, "unidade", e.target.value)}
+                              placeholder="mg/dL"
+                            />
+                          </div>
+                          <div>
+                            <Label>Referência</Label>
+                            <Input
+                              value={resultado.referencia}
+                              onChange={(e) => handleUpdateResultado(index, "referencia", e.target.value)}
+                              placeholder="70-99"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Select
+                              value={resultado.status}
+                              onValueChange={(value) => handleUpdateResultado(index, "status", value)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="normal">Normal</SelectItem>
+                                <SelectItem value="alterado">Alterado</SelectItem>
+                                <SelectItem value="critico">Crítico</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {resultadosDigitados.length > 1 && (
                               <Button
-                                variant="link"
-                                size="sm"
-                                className="px-0 h-auto"
-                                onClick={() => window.open(exame.pdfUrl || exame.imagemUrl, "_blank")}
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRemoveResultado(index)}
+                                aria-label="Remover parâmetro"
                               >
-                                <ExternalLink className="h-4 w-4 mr-1" />
-                                Abrir
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             )}
                           </div>
-                        )}
-                        {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
-                          <ExameResultadosTable resultados={exame.resultados} />
-                        )}
-                      </Card>
-                    ))}
-                    {seriesEvolucao.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-semibold text-gray-800">
-                            Evolução de parâmetros (exige ao menos 2 registros)
-                          </h4>
-                          <Badge variant="secondary">{seriesEvolucao.length} parâmetros</Badge>
                         </div>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          {seriesEvolucao.slice(0, 4).map((serie, idx) => {
-                            const ultimo = serie.pontos[serie.pontos.length - 1];
-                            const cores = ["#2563eb", "#16a34a", "#f59e0b", "#8b5cf6"];
-                            const cor = cores[idx % cores.length];
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-                            return (
-                              <Card key={serie.id} className="border border-gray-100 shadow-sm">
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-sm">{serie.parametro}</CardTitle>
-                                  {serie.unidade && <CardDescription>Unidade: {serie.unidade}</CardDescription>}
-                                </CardHeader>
-                                <CardContent>
-                                  <EvolutionChart
-                                    data={serie.pontos.map((p) => ({ date: p.data, value: p.valor }))}
-                                    label={serie.parametro}
-                                    color={cor}
-                                    unit={serie.unidadeBase || serie.unidade || ""}
-                                    title={`Evolução de ${serie.parametro}`}
-                                    warning={serie.avisoUnidade}
-                                  />
-                                  <div className="mt-3 text-xs text-gray-600 flex items-center gap-2">
-                                    <TrendingUp className="h-4 w-4" />
-                                    <span>
-                                      Último valor: <strong>{ultimo.valor}</strong>
-                                      {serie.unidadeBase ? ` ${serie.unidadeBase}` : ""} em{" "}
-                                      {new Date(ultimo.data).toLocaleDateString("pt-BR")}
-                                    </span>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                <DialogFooter className="flex gap-2">
+                  <Button type="button" variant="ghost" onClick={() => setIsExameDialogOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={salvandoExame}>
+                    {salvandoExame && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {exameEmEdicaoId ? "Atualizar" : "Salvar"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
 
           {/* Aba Bioimpedância */}
           <TabsContent value="bioimpedancia">

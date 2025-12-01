@@ -2,9 +2,12 @@
  * Serviço para gerar documentos médicos (receituários, bioimpedância, etc.)
  */
 
-import { fillReceituarioSVG, fillBioimpedanciaSVG, convertSVGtoPDF, type ReceituarioData, type BioimpedanciaData } from "./svgProcessor";
-import { uploadPdfBuffer } from "./storage";
-export { generateLaudoPDF } from "./lib/laudoPdfService";
+import {
+  fillBioimpedanciaSVG,
+  convertSVGtoPDF,
+  type BioimpedanciaData,
+} from "./svgProcessor";
+import { gerarPrescricaoPdf } from "./lib/prescricaoPdfService";
 
 export interface GenerateReceituarioParams {
   pacienteNome: string;
