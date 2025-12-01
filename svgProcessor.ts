@@ -8,6 +8,7 @@ import { join } from "path";
 export interface ReceituarioData {
   nomePaciente: string;
   data: string;
+  assinaturaTipo?: "digital" | "manual";
   medicamentos: Array<{
     nome: string;
     dosagem: string;
@@ -55,7 +56,12 @@ export interface BioimpedanciaData {
 export async function fillReceituarioSVG(data: ReceituarioData): Promise<string> {
   const templatePath = join(process.cwd(), "templates", "Receituario2.svg");
   const svgBackground = await readFile(templatePath, "utf-8");
-  
+
+  const assinaturaLabel =
+    data.assinaturaTipo === "manual"
+      ? "Assinatura manual (imprimir e assinar)"
+      : "Assinatura digital (arquivo já sai assinado)";
+
   // Criar HTML com SVG como background e texto sobreposto
   const html = `
 <!DOCTYPE html>
@@ -105,6 +111,18 @@ export async function fillReceituarioSVG(data: ReceituarioData): Promise<string>
       border-bottom: 2px solid #E5E7EB;
       padding-bottom: 10px;
     }
+    .signature-info {
+      font-size: 13px;
+      color: #4B5563;
+      margin-bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(44, 90, 160, 0.05);
+      padding: 8px 10px;
+      border-radius: 6px;
+      border-left: 3px solid #2C5AA0;
+    }
     .medication-item {
       margin-bottom: 25px;
       padding: 15px;
@@ -152,7 +170,11 @@ export async function fillReceituarioSVG(data: ReceituarioData): Promise<string>
       <div><strong>Paciente:</strong> ${escapeHTML(data.nomePaciente)}</div>
       <div><strong>Data:</strong> ${escapeHTML(data.data)}</div>
     </div>
-    
+
+    <div class="signature-info">
+      <strong>Assinatura:</strong> ${escapeHTML(assinaturaLabel)}
+    </div>
+
     <div class="prescription-title">Prescrição Médica</div>
     
     ${data.medicamentos.map((med, index) => `

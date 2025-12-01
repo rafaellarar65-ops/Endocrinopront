@@ -1,0 +1,23 @@
+Resumo das alterações implementadas
+- Fluxo de exames laboratoriais unificado com criação, edição e remoção de pacotes diretamente na aba Exames da consulta, incluindo upload para IA (imagem/PDF), preenchimento automático e linhas manuais com IDs determinísticos que alinham parâmetros digitados e extraídos. As listas e botões de editar/remover mantêm o histórico sincronizado após salvar.
+- Normalização de parâmetros laboratoriais: mapeamento de IDs fixos para exames comuns, geração estável de novos IDs a partir de nomes (inclusive com acentos), parsing numérico resiliente e tratamento de séries com unidades mistas (ex.: mmol/L -> mg/dL) com avisos de conversão nos gráficos.
+- Evolução dos exames: a tabela compacta reaproveitável exibe parâmetros com seus IDs e resultados, enquanto os gráficos agora mostram alertas quando existem unidades diferentes na mesma série.
+- Seção de áudios do paciente aprimorada: exibe quantidade de áudios disponíveis, duração calculada ao carregar o player, horário e status da consulta, além de botão de download direto.
+- Testes de utilitários de exames atualizados para cobrir IDs determinísticos, parsing numérico e conversão com aviso quando há mistura de unidades.
+
+Como testar localmente
+1) Instale dependências (se ainda não instaladas): pnpm install
+2) Rode os testes de exames (Vitest): pnpm test --filter exames-evolucao
+3) Opcional: execute toda a suíte de testes: pnpm test
+
+Como baixar/enviar os arquivos ao Manus
+- Se estiver trabalhando em outra máquina, faça clone e atualize a branch: git clone <repo-url> && cd Endocrinopront && git checkout work && git pull
+- Para revisar localmente antes de enviar, gere um pacote zip só com esta branch: git archive --format zip --output endocrino-atualizado.zip work
+- Para entregar via Manus (pipeline Git), faça push da branch work: git push origin work. Caso use upload manual na plataforma, envie o arquivo endocrino-atualizado.zip gerado acima.
+
+Checklist rápido antes de abrir/atualizar o PR no GitHub/Manus
+- Conferir se o status do git está limpo: git status -sb
+- Garantir que não há pasta node_modules/ ou outros arquivos grandes fora do .gitignore
+- Rodar pelo menos a suíte focal de exames ou a que sofreu alteração mais recente
+- Descrever no PR se testes não foram executados por limitação de ambiente
+- Após o push da branch work, confirmar se o pipeline automático do Manus/GitHub foi disparado

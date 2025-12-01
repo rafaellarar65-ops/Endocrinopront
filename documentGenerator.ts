@@ -8,6 +8,7 @@ import { storagePut } from "../storage";
 export interface GenerateReceituarioParams {
   pacienteNome: string;
   data: string;
+  assinaturaTipo?: "digital" | "manual";
   medicamentos: Array<{
     nome: string;
     dosagem: string;
@@ -58,6 +59,7 @@ export async function generateReceituarioPDF(
   const data: ReceituarioData = {
     nomePaciente: params.pacienteNome,
     data: params.data,
+    assinaturaTipo: params.assinaturaTipo,
     medicamentos: params.medicamentos,
     instrucoesAdicionais: params.instrucoesAdicionais,
   };

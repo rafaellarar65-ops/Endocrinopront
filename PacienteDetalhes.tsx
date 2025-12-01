@@ -17,20 +17,27 @@ import {
   Stethoscope,
   Plus,
   Clock,
-  MapPin
+  MapPin,
+  Volume2,
+  Download,
+  Paperclip,
+  ExternalLink
 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { getLoginUrl } from "@/const";
-import { useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExameResultadosTable } from "./ExameResultadosTable";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
+import EvolutionChart from "./EvolutionChart";
+import { montarSeriesEvolucao } from "./examesUtils";
 
 export default function PacienteDetalhes() {
-  const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { loading: authLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [, params] = useRoute("/pacientes/:id");
   const pacienteId = params?.id ? parseInt(params.id) : 0;
@@ -38,6 +45,7 @@ export default function PacienteDetalhes() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConsultaDialogOpen, setIsConsultaDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [duracoesAudio, setDuracoesAudio] = useState<Record<number, number>>({});
 
   const { data: paciente, isLoading, refetch } = trpc.pacientes.getById.useQuery(
     { id: pacienteId },
@@ -54,6 +62,8 @@ export default function PacienteDetalhes() {
     { enabled: isAuthenticated && pacienteId > 0 }
   );
 
+  const seriesEvolucao = useMemo(() => montarSeriesEvolucao(exames ?? []), [exames]);
+
   const { data: bioimpedancias } = trpc.bioimpedancia.getByPaciente.useQuery(
     { pacienteId },
     { enabled: isAuthenticated && pacienteId > 0 }
@@ -67,6 +77,168 @@ export default function PacienteDetalhes() {
   const { data: indicadores } = trpc.indicadores.getByPaciente.useQuery(
     { pacienteId },
     { enabled: isAuthenticated && pacienteId > 0 }
+  );
+
+  const timelineEventos = useMemo(() => {
+    const eventos: Array<{
+      data: string;
+      tipo: "consulta" | "exame" | "bioimpedancia";
+      titulo: string;
+      descricao?: string;
+      badge?: string;
+    }> = [];
+
+    consultas?.forEach((consulta) => {
+      const dataReferencia = consulta.dataHora || consulta.createdAt || new Date();
+      const soapPartes = [
+        consulta.anamnese?.queixaPrincipal
+          ? `S: ${consulta.anamnese.queixaPrincipal}`
+          : undefined,
+        consulta.exameFisico?.exameGeral
+          ? `O: ${consulta.exameFisico.exameGeral}`
+          : undefined,
+        consulta.hipotesesDiagnosticas ? `A: ${consulta.hipotesesDiagnosticas}` : undefined,
+        consulta.conduta ? `P: ${consulta.conduta}` : undefined,
+      ].filter(Boolean);
+
+      eventos.push({
+        data: dataReferencia as unknown as string,
+        tipo: "consulta",
+        titulo: `Consulta ${new Date(dataReferencia).toLocaleDateString("pt-BR")}`,
+        descricao: soapPartes.join(" | ") || "Sem notas SOAP registradas.",
+        badge: consulta.status === "concluida" ? "Finalizada" : "Em aberto",
+      });
+
+      if (consulta.conduta) {
+        const texto = consulta.conduta.toLowerCase();
+        if (/inicia|introduz/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Marco: Início de medicação",
+            descricao: consulta.conduta,
+            badge: "Marco",
+          });
+        }
+        if (/aumenta|reduz|ajusta/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Marco: Ajuste de dose",
+            descricao: consulta.conduta,
+            badge: "Dose",
+          });
+        }
+        if (/evento adverso|efeito colateral|reacao/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Evento adverso",
+            descricao: consulta.conduta,
+            badge: "Alerta",
+          });
+        }
+      }
+    });
+
+    exames?.forEach((exame) => {
+      eventos.push({
+        data: exame.dataExame as unknown as string,
+        tipo: "exame",
+        titulo: `Exame ${exame.tipo || "Laboratorial"}`,
+        descricao: `${exame.resultados?.length || 0} resultados registrados`,
+        badge: "Exame",
+      });
+    });
+
+    bioimpedancias?.forEach((bio) => {
+      eventos.push({
+        data: bio.dataAvaliacao as unknown as string,
+        tipo: "bioimpedancia",
+        titulo: "Bioimpedância",
+        descricao: bio.observacoes || "Avaliação corporal registrada",
+        badge: "Composição",
+      });
+    });
+
+    return eventos.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+  }, [bioimpedancias, consultas, exames]);
+
+  const comparacaoExames = useMemo(() => {
+    return seriesEvolucao
+      .map((serie) => {
+        const ultimo = serie.pontos[serie.pontos.length - 1];
+        const penultimo = serie.pontos[serie.pontos.length - 2];
+        if (!ultimo || !penultimo) return null;
+        const delta = ultimo.valor - penultimo.valor;
+        return {
+          parametro: serie.parametro,
+          atual: `${ultimo.valor.toFixed(2)} ${serie.unidadeBase || ""}`,
+          anterior: `${penultimo.valor.toFixed(2)} ${serie.unidadeBase || ""}`,
+          dataAtual: new Date(ultimo.data).toLocaleDateString("pt-BR"),
+          dataAnterior: new Date(penultimo.data).toLocaleDateString("pt-BR"),
+          tendencia: delta > 0 ? "alta" : delta < 0 ? "queda" : "estavel",
+          aviso: serie.avisoUnidade,
+        };
+      })
+      .filter(Boolean);
+  }, [seriesEvolucao]);
+
+  const aderencia = useMemo(() => {
+    if (!consultas || consultas.length === 0) return { percentual: 0, descricao: "Sem consultas registradas" };
+    const concluidas = consultas.filter((c) => c.status === "concluida").length;
+    const percentual = Math.round((concluidas / consultas.length) * 100);
+    return {
+      percentual,
+      descricao: `${concluidas} de ${consultas.length} consultas finalizadas`,
+    };
+  }, [consultas]);
+
+  const pesoData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.peso ? ind.peso / 1000 : null,
+      })),
+    [indicadores]
+  );
+
+  const imcData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.imc ? ind.imc / 100 : null,
+      })),
+    [indicadores]
+  );
+
+  const glicemiaData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.glicemiaJejum ?? null,
+      })),
+    [indicadores]
+  );
+
+  const hba1cData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.hemoglobinaGlicada ? ind.hemoglobinaGlicada / 100 : null,
+      })),
+    [indicadores]
+  );
+
+  const paData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.pressaoArterialSistolica && ind.pressaoArterialDiastolica
+          ? ind.pressaoArterialSistolica / 10 + ind.pressaoArterialDiastolica / 100
+          : null,
+      })),
+    [indicadores]
   );
 
   const updateMutation = trpc.pacientes.update.useMutation({
@@ -109,14 +281,23 @@ export default function PacienteDetalhes() {
     const offset = -3; // UTC-3 (Brasília)
     const diff = offset * 60 + now.getTimezoneOffset();
     const brasiliaTime = new Date(now.getTime() + diff * 60 * 1000);
-    
+
     const year = brasiliaTime.getFullYear();
     const month = String(brasiliaTime.getMonth() + 1).padStart(2, '0');
     const day = String(brasiliaTime.getDate()).padStart(2, '0');
     const hours = String(brasiliaTime.getHours()).padStart(2, '0');
     const minutes = String(brasiliaTime.getMinutes()).padStart(2, '0');
-    
+
     return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  const formatarDuracao = (duracaoSegundos?: number) => {
+    if (!duracaoSegundos || Number.isNaN(duracaoSegundos)) return "--:--";
+    const minutos = Math.floor(duracaoSegundos / 60);
+    const segundos = Math.floor(duracaoSegundos % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${minutos}:${segundos}`;
   };
 
   const [consultaFormData, setConsultaFormData] = useState({
@@ -293,13 +474,15 @@ export default function PacienteDetalhes() {
 
         {/* Tabs */}
         <Tabs defaultValue="info" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="info">Informações</TabsTrigger>
             <TabsTrigger value="consultas">Consultas</TabsTrigger>
             <TabsTrigger value="exames">Exames</TabsTrigger>
+            <TabsTrigger value="audios">Áudios</TabsTrigger>
             <TabsTrigger value="bioimpedancia">Bioimpedância</TabsTrigger>
             <TabsTrigger value="documentos">Documentos</TabsTrigger>
             <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
+            <TabsTrigger value="evolucao">Evolução</TabsTrigger>
           </TabsList>
 
           {/* Aba Informações */}
@@ -647,6 +830,104 @@ export default function PacienteDetalhes() {
             </Card>
           </TabsContent>
 
+          {/* Aba Áudios */}
+          <TabsContent value="audios">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Áudios das Consultas</CardTitle>
+                    <CardDescription>Reproduza ou baixe os áudios associados às consultas</CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Volume2 className="h-4 w-4" />
+                    {consultas?.filter((c) => c.audioUrl)?.length || 0} áudios
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!consultas || consultas.length === 0 ? (
+                  <div className="text-center text-gray-500 py-10">
+                    Nenhuma consulta encontrada para este paciente.
+                  </div>
+                ) : (
+                  (() => {
+                    const consultasComAudio = consultas
+                      .filter((consulta) => !!consulta.audioUrl)
+                      .sort(
+                        (a, b) => new Date(b.dataHora).getTime() - new Date(a.dataHora).getTime()
+                      );
+
+                    if (consultasComAudio.length === 0) {
+                      return (
+                        <div className="text-center text-gray-500 py-10">
+                          Nenhum áudio disponível nas consultas registradas.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        {consultasComAudio.map((consulta) => (
+                          <Card key={consulta.id} className="border border-gray-200">
+                            <CardHeader className="pb-2">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <CardTitle className="text-base">
+                                    Consulta em {new Date(consulta.dataHora).toLocaleDateString("pt-BR")}
+                                  </CardTitle>
+                                  <CardDescription>
+                                    {new Date(consulta.dataHora).toLocaleTimeString("pt-BR", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                    {consulta.status ? ` • ${consulta.status}` : ""}
+                                    {duracoesAudio[consulta.id] &&
+                                      ` • Duração: ${formatarDuracao(duracoesAudio[consulta.id])}`}
+                                  </CardDescription>
+                                </div>
+                                <Badge variant="outline">Áudio</Badge>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <audio
+                                controls
+                                className="w-full"
+                                src={consulta.audioUrl || undefined}
+                                onLoadedMetadata={(event) => {
+                                  if (!Number.isFinite(event.currentTarget.duration)) return;
+                                  setDuracoesAudio((prev) => ({
+                                    ...prev,
+                                    [consulta.id]: event.currentTarget.duration,
+                                  }));
+                                }}
+                              />
+                              <div className="flex items-center justify-between text-xs text-gray-600">
+                                <span className="flex items-center gap-2">
+                                  <Volume2 className="h-4 w-4" />
+                                  Arquivo salvo no prontuário
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex items-center gap-2"
+                                  onClick={() => consulta.audioUrl && window.open(consulta.audioUrl, "_blank")}
+                                >
+                                  <Download className="h-4 w-4" />
+                                  Baixar
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    );
+                  })()
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Aba Exames */}
           <TabsContent value="exames">
             <Card>
@@ -692,8 +973,72 @@ export default function PacienteDetalhes() {
                             </div>
                           </div>
                         </CardHeader>
+                        {(exame.fileName || exame.pdfUrl || exame.imagemUrl) && (
+                          <div className="px-6 -mt-3 flex items-center gap-2 text-xs text-gray-600">
+                            <Paperclip className="h-4 w-4" />
+                            <span className="truncate">{exame.fileName || "Arquivo anexado"}</span>
+                            {(exame.pdfUrl || exame.imagemUrl) && (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="px-0 h-auto"
+                                onClick={() => window.open(exame.pdfUrl || exame.imagemUrl, "_blank")}
+                              >
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                Abrir
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
+                          <ExameResultadosTable resultados={exame.resultados} />
+                        )}
                       </Card>
                     ))}
+                    {seriesEvolucao.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-semibold text-gray-800">
+                            Evolução de parâmetros (exige ao menos 2 registros)
+                          </h4>
+                          <Badge variant="secondary">{seriesEvolucao.length} parâmetros</Badge>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-4">
+                          {seriesEvolucao.slice(0, 4).map((serie, idx) => {
+                            const ultimo = serie.pontos[serie.pontos.length - 1];
+                            const cores = ["#2563eb", "#16a34a", "#f59e0b", "#8b5cf6"];
+                            const cor = cores[idx % cores.length];
+
+                            return (
+                              <Card key={serie.id} className="border border-gray-100 shadow-sm">
+                                <CardHeader className="pb-2">
+                                  <CardTitle className="text-sm">{serie.parametro}</CardTitle>
+                                  {serie.unidade && <CardDescription>Unidade: {serie.unidade}</CardDescription>}
+                                </CardHeader>
+                                <CardContent>
+                                  <EvolutionChart
+                                    data={serie.pontos.map((p) => ({ date: p.data, value: p.valor }))}
+                                    label={serie.parametro}
+                                    color={cor}
+                                    unit={serie.unidadeBase || serie.unidade || ""}
+                                    title={`Evolução de ${serie.parametro}`}
+                                    warning={serie.avisoUnidade}
+                                  />
+                                  <div className="mt-3 text-xs text-gray-600 flex items-center gap-2">
+                                    <TrendingUp className="h-4 w-4" />
+                                    <span>
+                                      Último valor: <strong>{ultimo.valor}</strong>
+                                      {serie.unidadeBase ? ` ${serie.unidadeBase}` : ""} em{" "}
+                                      {new Date(ultimo.data).toLocaleDateString("pt-BR")}
+                                    </span>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -854,6 +1199,115 @@ export default function PacienteDetalhes() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Aba Evolução e Acompanhamento */}
+          <TabsContent value="evolucao">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Timeline de evolução</CardTitle>
+                      <CardDescription>Consultas, exames, bioimpedância e marcos clínicos</CardDescription>
+                    </div>
+                    <Badge variant="outline">Aderência {aderencia.percentual}%</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {timelineEventos.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">Sem eventos para exibir</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {timelineEventos.map((evento, index) => (
+                        <div key={`${evento.tipo}-${index}`} className="flex gap-3 items-start">
+                          <div className="w-20 text-xs text-gray-500 pt-1">
+                            {new Date(evento.data).toLocaleDateString("pt-BR")}
+                          </div>
+                          <div className="flex-1 border-l pl-4 pb-4">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">{evento.titulo}</Badge>
+                              {evento.badge && <Badge variant="outline">{evento.badge}</Badge>}
+                            </div>
+                            <p className="text-sm text-gray-700 mt-1">{evento.descricao}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Gráficos de evolução</CardTitle>
+                  <CardDescription>Peso, IMC, glicemia, HbA1c e pressão arterial</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <EvolutionChart data={pesoData} label="Peso" color="#2563eb" unit="kg" title="Peso" />
+                    <EvolutionChart data={imcData} label="IMC" color="#7c3aed" unit="kg/m²" title="IMC" />
+                    <EvolutionChart data={glicemiaData} label="Glicemia" color="#f59e0b" unit="mg/dL" title="Glicemia de Jejum" />
+                    <EvolutionChart data={hba1cData} label="HbA1c" color="#ef4444" unit="%" title="Hemoglobina Glicada" />
+                    <EvolutionChart data={paData} label="PA" color="#10b981" unit="mmHg" title="Pressão Arterial" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Comparação de exames recentes</CardTitle>
+                  <CardDescription>Diferenças entre os dois últimos pontos de cada parâmetro</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(!comparacaoExames || comparacaoExames.length === 0) && (
+                    <div className="text-sm text-gray-500">Sem séries suficientes para comparar.</div>
+                  )}
+                  {comparacaoExames?.map((comp, idx) => (
+                    <div key={`${comp?.parametro}-${idx}`} className="p-4 rounded-lg border bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-gray-800">{comp?.parametro}</div>
+                        {comp?.tendencia === "alta" && <Badge variant="secondary">Em alta</Badge>}
+                        {comp?.tendencia === "queda" && <Badge variant="outline">Em queda</Badge>}
+                        {comp?.tendencia === "estavel" && <Badge variant="outline">Estável</Badge>}
+                      </div>
+                      <p className="text-sm text-gray-700 mt-1">
+                        Último: {comp?.atual} ({comp?.dataAtual}) • Anterior: {comp?.anterior} ({comp?.dataAnterior})
+                      </p>
+                      {comp?.aviso && (
+                        <p className="text-[11px] text-amber-700 mt-2 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                          {comp.aviso}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Indicadores de aderência</CardTitle>
+                  <CardDescription>Visão rápida de acompanhamento longitudinal</CardDescription>
+                </CardHeader>
+                <CardContent className="grid md:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Consultas finalizadas</p>
+                    <p className="text-3xl font-bold">{aderencia.percentual}%</p>
+                    <p className="text-xs text-gray-500">{aderencia.descricao}</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Exames registrados</p>
+                    <p className="text-3xl font-bold">{exames?.length || 0}</p>
+                    <p className="text-xs text-gray-500">Pacotes utilizados em séries evolutivas</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Bioimpedâncias</p>
+                    <p className="text-3xl font-bold">{bioimpedancias?.length || 0}</p>
+                    <p className="text-xs text-gray-500">Consideradas nos marcos do paciente</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>

@@ -90,6 +90,8 @@ export const examesLaboratoriais = mysqlTable("examesLaboratoriais", {
   pdfUrl: varchar("pdfUrl", { length: 500 }), // URL do PDF
   imagemPath: varchar("imagemPath", { length: 500 }), // Caminho da imagem no S3
   imagemUrl: varchar("imagemUrl", { length: 500 }), // URL da imagem
+  mimeType: varchar("mimeType", { length: 255 }), // Tipo do arquivo enviado (PDF/Imagem)
+  fileName: varchar("fileName", { length: 255 }), // Nome original do arquivo
   observacoes: text("observacoes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -139,6 +141,25 @@ export const escoresClinicos = mysqlTable("escoresClinicos", {
 
 export type EscoreClinico = typeof escoresClinicos.$inferSelect;
 export type InsertEscoreClinico = typeof escoresClinicos.$inferInsert;
+
+/**
+ * Catálogo de escores - módulos registrados (inclui escores criados via IA)
+ */
+export const escoreModulos = mysqlTable("escoreModulos", {
+  id: int("id").autoincrement().primaryKey(),
+  nome: varchar("nome", { length: 255 }).notNull(),
+  descricao: text("descricao"),
+  categoria: varchar("categoria", { length: 120 }),
+  parametrosNecessarios: json("parametrosNecessarios"),
+  referencia: text("referencia"),
+  faixasInterpretacao: json("faixasInterpretacao"),
+  criadoViaIA: boolean("criadoViaIA").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EscoreModulo = typeof escoreModulos.$inferSelect;
+export type InsertEscoreModulo = typeof escoreModulos.$inferInsert;
 
 /**
  * Planos Terapêuticos - Planos de tratamento
@@ -195,7 +216,15 @@ export const documentos = mysqlTable("documentos", {
   pacienteId: int("pacienteId").notNull(),
   consultaId: int("consultaId"),
   medicoId: int("medicoId").notNull(),
-  tipo: mysqlEnum("tipo", ["receituario", "atestado", "declaracao", "relatorio", "encaminhamento", "laudo"]).notNull(),
+  tipo: mysqlEnum("tipo", [
+    "receituario",
+    "atestado",
+    "declaracao",
+    "relatorio",
+    "encaminhamento",
+    "laudo",
+    "pts",
+  ]).notNull(),
   titulo: varchar("titulo", { length: 255 }).notNull(),
   conteudoHTML: text("conteudoHTML"), // Conteúdo em HTML/Markdown
   pdfPath: varchar("pdfPath", { length: 500 }),

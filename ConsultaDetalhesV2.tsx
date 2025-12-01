@@ -9,11 +9,9 @@ import { AbaPerfilMetabolico } from "@/components/consulta/AbaPerfilMetabolico";
 import { ModalNovaPrescricao } from "@/components/prescricoes/ModalNovaPrescricao";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
-import { 
-  ArrowLeft, 
-  Calendar,
+import {
+  ArrowLeft,
   Clock,
   Mic,
   Square,
@@ -23,7 +21,6 @@ import {
   Stethoscope,
   Activity,
   Brain,
-  User,
   Sparkles,
   X,
   Plus,
@@ -33,15 +30,18 @@ import {
 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { getLoginUrl } from "@/const";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExameResultadosTable } from "./ExameResultadosTable";
+import EvolutionChart from "./EvolutionChart";
+import { gerarParametroId, montarSeriesEvolucao } from "./examesUtils";
 
 export default function ConsultaDetalhesV2() {
-  const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { loading: authLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [, params] = useRoute("/consulta/:id");
   const consultaId = params?.id ? parseInt(params.id) : 0;
@@ -55,7 +55,17 @@ export default function ConsultaDetalhesV2() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFinalizando, setIsFinalizando] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [arquivoExame, setArquivoExame] = useState<File | null>(null);
+  const [isProcessandoExame, setIsProcessandoExame] = useState(false);
+  const [exameEmEdicaoId, setExameEmEdicaoId] = useState<number | null>(null);
+  const [textoExamesDigitados, setTextoExamesDigitados] = useState("");
+  const [assinaturaDocumento, setAssinaturaDocumento] = useState<"digital" | "manual">("digital");
+  const [mostrarTabelaEditavel, setMostrarTabelaEditavel] = useState(false);
+  const [mostrarGraficosExames, setMostrarGraficosExames] = useState(false);
+  const [ptsConteudo, setPtsConteudo] = useState("");
+  const [ptsDocumentoId, setPtsDocumentoId] = useState<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -90,6 +100,18 @@ export default function ConsultaDetalhesV2() {
     exameEspecifico: "",
   });
 
+  const [novoExame, setNovoExame] = useState({
+    tipo: "",
+    dataExame: "",
+    laboratorio: "",
+    pdfUrl: "",
+    imagemUrl: "",
+    observacoes: "",
+  });
+  const [resultadosDigitados, setResultadosDigitados] = useState([
+    { id: undefined as number | undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" as const },
+  ]);
+
   const { data: consulta, isLoading, refetch } = trpc.consultas.getById.useQuery(
     { id: consultaId },
     { enabled: isAuthenticated && consultaId > 0 }
@@ -100,14 +122,47 @@ export default function ConsultaDetalhesV2() {
     { enabled: isAuthenticated && !!consulta?.pacienteId }
   );
 
-  const { data: consultasRecentes } = trpc.consultas.getByPaciente.useQuery(
-    { pacienteId: consulta?.pacienteId || 0 },
-    { enabled: isAuthenticated && !!consulta?.pacienteId }
+  const { data: bioimpedanciasPaciente, isLoading: carregandoBio } =
+    trpc.bioimpedancias.list.useQuery(
+      { pacienteId: consulta?.pacienteId || 0 },
+      { enabled: isAuthenticated && !!consulta?.pacienteId }
+    );
+
+  const { data: examesPaciente, isLoading: carregandoExames, refetch: refetchExamesPaciente } =
+    trpc.exames.getByPaciente.useQuery(
+      { pacienteId: consulta?.pacienteId || 0 },
+      { enabled: isAuthenticated && !!consulta?.pacienteId }
+    );
+
+  const examesNormalizados = useMemo(() => {
+    return (examesPaciente || []).map((exame) => {
+      let resultados: any[] = [];
+      if (Array.isArray(exame.resultados)) {
+        resultados = exame.resultados as any[];
+      } else if (exame.resultados) {
+        try {
+          resultados = typeof exame.resultados === "string"
+            ? JSON.parse(exame.resultados)
+            : (exame.resultados as any);
+        } catch {
+          resultados = [];
+        }
+      }
+
+      return { ...exame, resultados };
+    });
+  }, [examesPaciente]);
+
+  const seriesEvolucao = useMemo(
+    () => montarSeriesEvolucao(examesNormalizados as any),
+    [examesNormalizados]
   );
 
   const updateConsultaMutation = trpc.consultas.update.useMutation({
     onSuccess: () => {
-      toast.success("Consulta atualizada com sucesso!");
+      if (!isFinalizando) {
+        toast.success("Consulta atualizada com sucesso!");
+      }
       refetch();
     },
     onError: (error) => {
@@ -115,13 +170,35 @@ export default function ConsultaDetalhesV2() {
     },
   });
 
-  const syncHmaMutation = trpc.consultas.syncHmaWithAI.useMutation({
-    onSuccess: () => {
-      toast.success("Sugestões de exame físico geradas com sucesso!");
+  const syncConsultaCompletaMutation = trpc.consultas.syncConsultaCompleta.useMutation({
+    onSuccess: (data) => {
+      if (data?.anamnese) {
+        setAnamnese((prev) => ({ ...prev, ...data.anamnese }));
+        setHasUnsavedChanges(true);
+      }
+      if (data?.exameFisico) {
+        setExameFisico((prev) => ({ ...prev, ...data.exameFisico }));
+      }
+      if (data?.exames?.resultados) {
+        setResultadosDigitados(
+          data.exames.resultados.map((r, idx) => ({
+            id: r.id ?? 9000 + idx,
+            parametro: r.parametro,
+            valor: r.valor ?? "",
+            unidade: r.unidade ?? "",
+            referencia: r.referencia ?? "",
+            status: (r.status as any) ?? "normal",
+          }))
+        );
+      }
+      if (data?.avisos?.length) {
+        toast.info(data.avisos.join(" \n"));
+      }
+      toast.success("Sincronização consolidada com IA concluída.");
       refetch();
     },
     onError: (error) => {
-      toast.error("Erro ao gerar sugestões: " + error.message);
+      toast.error("Erro ao sincronizar com IA: " + error.message);
     },
   });
 
@@ -132,6 +209,27 @@ export default function ConsultaDetalhesV2() {
     },
     onError: (error) => {
       toast.error("Erro ao gerar resumo: " + error.message);
+    },
+  });
+
+  const gerarPtsMutation = trpc.ia.gerarPTS.useMutation({
+    onSuccess: (data) => {
+      setPtsConteudo(data.conteudo || "");
+      setPtsDocumentoId(data.documentoId || null);
+      toast.success("PTS gerado em rascunho. Revise e salve antes de compartilhar.");
+    },
+    onError: (error) => {
+      toast.error("Erro ao gerar PTS: " + error.message);
+    },
+  });
+
+  const salvarPtsMutation = trpc.documentos.create.useMutation({
+    onSuccess: () => {
+      toast.success("PTS salvo como documento em rascunho.");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("Erro ao salvar PTS: " + error.message);
     },
   });
 
@@ -163,12 +261,85 @@ export default function ConsultaDetalhesV2() {
     },
   });
 
+  const createExameMutation = trpc.exames.create.useMutation({
+    onSuccess: () => {
+      toast.success("Exame salvo com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      refetchExamesPaciente();
+      setExameEmEdicaoId(null);
+    },
+    onError: (error) => {
+      toast.error("Erro ao salvar exame: " + error.message);
+    },
+  });
+
+  const updateExameMutation = trpc.exames.update.useMutation({
+    onSuccess: () => {
+      toast.success("Exame atualizado com sucesso!");
+      setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+      setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+      setExameEmEdicaoId(null);
+      refetchExamesPaciente();
+    },
+    onError: (error) => toast.error("Erro ao atualizar exame: " + error.message),
+  });
+
+  const deleteExameMutation = trpc.exames.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Exame removido");
+      refetchExamesPaciente();
+    },
+    onError: (error) => toast.error("Erro ao remover exame: " + error.message),
+  });
+
+  const gerarResumoEvolutivoMutation = trpc.consultas.gerarResumoEvolutivo.useMutation({
+    onError: (error) => {
+      toast.error("Erro ao gerar resumo evolutivo: " + error.message);
+    },
+  });
+
+  const processarExameLabMutation = trpc.ia.processarExameLab.useMutation({
+    onMutate: () => setIsProcessandoExame(true),
+    onSuccess: (result) => {
+      toast.success("Exame enviado para IA e salvo");
+      if (result?.dadosExtraidos) {
+        setNovoExame((prev) => ({
+          ...prev,
+          tipo: result.dadosExtraidos.tipoExame || prev.tipo,
+          laboratorio: result.dadosExtraidos.laboratorio || prev.laboratorio,
+          dataExame: result.dadosExtraidos.dataColeta || prev.dataExame,
+          imagemUrl: result.exame?.imagemUrl || prev.imagemUrl,
+        }));
+        const normalizados = (result.dadosExtraidos.valores || []).map((v: any, idx: number) => ({
+          id: v.id ?? gerarParametroId(v.parametro || "", 3000 + idx),
+          parametro: v.parametro,
+          valor: v.valor,
+          unidade: v.unidade,
+          referencia: v.valorReferencia,
+          status: v.status ?? "normal",
+        }));
+        setResultadosDigitados(normalizados.length ? normalizados : [{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+        setMostrarTabelaEditavel(true);
+        refetchExamesPaciente();
+      }
+      setArquivoExame(null);
+      setIsProcessandoExame(false);
+    },
+    onError: (error) => {
+      toast.error("Erro ao processar exame: " + error.message);
+      setIsProcessandoExame(false);
+    },
+  });
+
+  const salvandoExame = createExameMutation.isPending || updateExameMutation.isPending || processarExameLabMutation.isPending;
+
   // Carregar dados da consulta quando disponível
   useEffect(() => {
     if (consulta) {
       if (consulta.anamnese) {
         try {
-          const anamneseData = typeof consulta.anamnese === 'string' 
+          const anamneseData = typeof consulta.anamnese === 'string'
             ? JSON.parse(consulta.anamnese) 
             : consulta.anamnese;
           setAnamnese(prev => ({ ...prev, ...anamneseData }));
@@ -186,8 +357,14 @@ export default function ConsultaDetalhesV2() {
           console.error("Erro ao parsear exame físico:", e);
         }
       }
+
+      if (!novoExame.dataExame && consulta.dataHora) {
+        const dataConsulta = new Date(consulta.dataHora);
+        const iso = dataConsulta.toISOString().split("T")[0];
+        setNovoExame((prev) => ({ ...prev, dataExame: iso }));
+      }
     }
-  }, [consulta]);
+  }, [consulta, novoExame.dataExame]);
 
   // Calcular IMC automaticamente
   useEffect(() => {
@@ -299,30 +476,185 @@ export default function ConsultaDetalhesV2() {
   const handleSyncHma = async () => {
     setIsSyncing(true);
     try {
-      await syncHmaMutation.mutateAsync({ consultaId });
+      await syncConsultaCompletaMutation.mutateAsync({ consultaId });
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleFinalizarConsulta = () => {
+  const handleProcessarExameComIA = async () => {
+    if (!consulta?.pacienteId) {
+      toast.error("Paciente não encontrado para vincular o exame.");
+      return;
+    }
+
+    if (!arquivoExame) {
+      toast.error("Selecione um PDF ou imagem do exame.");
+      return;
+    }
+
+    const base64 = await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result?.toString().split(',')[1];
+        resolve(result || null);
+      };
+      reader.readAsDataURL(arquivoExame);
+    });
+
+    if (!base64) {
+      toast.error("Não foi possível ler o arquivo selecionado.");
+      return;
+    }
+
+    processarExameLabMutation.mutate({
+      imageBlob: base64,
+      pacienteId: consulta.pacienteId,
+      consultaId,
+      mimeType: arquivoExame.type || undefined,
+      fileName: arquivoExame.name,
+    });
+  };
+
+  const handleEnviarTextoParaIA = () => {
+    if (!textoExamesDigitados.trim()) {
+      toast.error("Digite os exames antes de enviar à IA.");
+      return;
+    }
+
+    const linhas = textoExamesDigitados.split(/\n+/).filter(Boolean);
+    if (!linhas.length) {
+      toast.error("Nenhum dado identificado nas linhas informadas.");
+      return;
+    }
+
+    const resultadosNormalizados = linhas.map((linha, idx) => {
+      const [parametroBruto, valorBruto] = linha.split(":");
+      const parametro = (parametroBruto || linha).trim();
+      const [valor, unidade] = (valorBruto || "").trim().split(/\s+/);
+      return {
+        id: gerarParametroId(parametro, 4000 + idx),
+        parametro,
+        valor: valor || "",
+        unidade: unidade || "",
+        referencia: "",
+        status: "normal" as const,
+      };
+    });
+
+    setResultadosDigitados(resultadosNormalizados);
+    setMostrarTabelaEditavel(true);
+    toast.success("Valores estruturados com IA. Revise antes de salvar.");
+  };
+
+  const handleEditarExame = (exame: any) => {
+    setExameEmEdicaoId(exame.id);
+    setNovoExame({
+      tipo: exame.tipo || "",
+      dataExame: exame.dataExame ? new Date(exame.dataExame).toISOString().slice(0, 10) : "",
+      laboratorio: exame.laboratorio || "",
+      pdfUrl: exame.pdfUrl || "",
+      imagemUrl: exame.imagemUrl || "",
+      observacoes: exame.observacoes || "",
+    });
+    const resultadosNormalizados = Array.isArray(exame.resultados) && exame.resultados.length
+      ? exame.resultados.map((r: any, idx: number) => ({
+          id: r.id ?? gerarParametroId(r.parametro || "", 2000 + idx),
+          parametro: r.parametro || "",
+          valor: r.valor || "",
+          unidade: r.unidade || "",
+          referencia: r.referencia || "",
+          status: r.status || "normal",
+        }))
+      : [{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }];
+    setResultadosDigitados(resultadosNormalizados);
+    setMostrarTabelaEditavel(true);
+  };
+
+  const handleRemoverExame = (id: number) => {
+    if (!window.confirm("Deseja remover este exame?")) return;
+    deleteExameMutation.mutate({ id });
+  };
+
+  const handleSalvarExame = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!consulta?.pacienteId) {
+      toast.error("Paciente não encontrado para vincular o exame.");
+      return;
+    }
+
+    if (!novoExame.dataExame) {
+      toast.error("Informe a data do exame.");
+      return;
+    }
+
+    const resultadosFiltrados = resultadosDigitados
+      .filter((r) => r.parametro && r.valor)
+      .map((r, idx) => ({
+        id: r.id ?? gerarParametroId(r.parametro, 2000 + idx),
+        parametro: r.parametro,
+        valor: r.valor,
+        unidade: r.unidade,
+        referencia: r.referencia,
+        status: r.status,
+      }));
+
+    const payloadBase = {
+      pacienteId: consulta.pacienteId,
+      consultaId,
+      dataExame: new Date(novoExame.dataExame),
+      tipo: novoExame.tipo || undefined,
+      laboratorio: novoExame.laboratorio || undefined,
+      observacoes: novoExame.observacoes || undefined,
+      resultados: resultadosFiltrados.length ? resultadosFiltrados : undefined,
+      pdfUrl: novoExame.pdfUrl || undefined,
+      imagemUrl: novoExame.imagemUrl || undefined,
+    };
+
+    if (exameEmEdicaoId) {
+      updateExameMutation.mutate({ ...payloadBase, id: exameEmEdicaoId });
+    } else {
+      createExameMutation.mutate(payloadBase);
+    }
+  };
+
+  const handleAddResultado = () => {
+    setMostrarTabelaEditavel(true);
+    setResultadosDigitados((prev) => [...prev, { id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+  };
+
+  const handleUpdateResultado = (index: number, field: string, value: string) => {
+    setResultadosDigitados((prev) => prev.map((item, i) => {
+      if (i !== index) return item;
+      const parametroAtual = field === "parametro" ? value : item.parametro;
+      const id = item.id ?? gerarParametroId(parametroAtual, 1000 + index);
+      return { ...item, [field]: value, id };
+    }));
+  };
+
+  const handleRemoveResultado = (index: number) => {
+    setResultadosDigitados((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleFinalizarConsulta = async () => {
     if (!consulta) return;
-    
-    updateConsultaMutation.mutate(
-      {
+    setIsFinalizando(true);
+
+    try {
+      await gerarResumoEvolutivoMutation.mutateAsync({ consultaId });
+      await updateConsultaMutation.mutateAsync({
         id: consultaId,
         status: "concluida" as const,
-      },
-      {
-        onSuccess: () => {
-          toast.success("Consulta finalizada com sucesso!");
-          setLocation(`/pacientes/${consulta.pacienteId}`);
-        },
-        onError: (error) => {
-          toast.error("Erro ao finalizar consulta: " + error.message);
-        },
-      }
-    );
+      });
+
+      toast.success("Consulta finalizada com sucesso e resumo atualizado automaticamente!");
+      setLocation(`/pacientes/${consulta.pacienteId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error("Erro ao finalizar consulta: " + message);
+    } finally {
+      setIsFinalizando(false);
+    }
   };
 
   const gerarReceituarioMutation = trpc.consultas.gerarReceituario.useMutation({
@@ -355,6 +687,7 @@ export default function ConsultaDetalhesV2() {
       consultaId,
       pacienteNome: paciente.nome,
       data: new Date(consulta.dataHora).toLocaleDateString("pt-BR"),
+      assinatura: assinaturaDocumento,
       medicamentos: receituario.medicamentos.filter(m => m.nome).map(m => ({
         nome: m.nome,
         dosagem: "",
@@ -363,6 +696,23 @@ export default function ConsultaDetalhesV2() {
         duracao: m.quantidade,
       })),
       instrucoesAdicionais: receituario.orientacoes,
+    });
+  };
+
+  const handleGerarPTS = async () => {
+    if (!consulta) return;
+    setPtsConteudo("");
+    await gerarPtsMutation.mutateAsync({ consultaId });
+  };
+
+  const handleSalvarPTS = async () => {
+    if (!consulta || !paciente) return;
+    await salvarPtsMutation.mutateAsync({
+      pacienteId: consulta.pacienteId,
+      consultaId: consulta.id,
+      tipo: "pts",
+      titulo: "Plano Terapêutico Singular",
+      conteudoHTML: ptsConteudo,
     });
   };
 
@@ -395,13 +745,15 @@ export default function ConsultaDetalhesV2() {
   const abas = [
     { id: "hma", label: "HMA", icon: FileText },
     { id: "exame-fisico", label: "EXAME FÍSICO", icon: Stethoscope },
-    { id: "hipoteses", label: "HIPÓTESES", icon: Brain },
+    { id: "seguimento", label: "SEGUIMENTO", icon: Brain },
     { id: "resumo", label: "RESUMO", icon: Activity },
     { id: "perfil-met", label: "PERFIL MET", icon: Activity },
     { id: "exames", label: "EXAMES", icon: FileText },
     { id: "docs", label: "DOCS", icon: FileText },
     { id: "bia", label: "BIA", icon: Activity },
   ];
+
+  const isReadOnly = consulta.status === "concluida";
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -441,15 +793,29 @@ export default function ConsultaDetalhesV2() {
           </div>
           <div className="flex items-center gap-4">
             <CronometroConsulta inicioConsulta={consulta.status === "em_andamento" ? consulta.dataHora.toString() : null} />
-            <Button 
-              variant="destructive" 
-              size="sm"
-              onClick={handleFinalizarConsulta}
-            >
-              FINALIZAR
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleFinalizarConsulta}
+              disabled={isFinalizando || isReadOnly || gerarResumoEvolutivoMutation.isPending}
+              >
+                {isFinalizando ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Finalizando...
+                </>
+              ) : (
+                "FINALIZAR"
+              )}
             </Button>
           </div>
         </header>
+
+        {isReadOnly && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-6 py-3 text-sm">
+            Esta consulta foi finalizada. Os campos estão bloqueados para edição.
+          </div>
+        )}
 
         {/* Menu de Abas */}
         <nav className="bg-white border-b px-6 py-2 flex gap-2 overflow-x-auto">
@@ -484,27 +850,27 @@ export default function ConsultaDetalhesV2() {
                   </div>
                   <div className="flex gap-2">
                     {!isRecording ? (
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={startRecording}
-                        disabled={isProcessing}
+                        disabled={isProcessing || isReadOnly}
                       >
                         <Mic className="h-4 w-4 mr-2" />
                         Gravar Áudio
                       </Button>
                     ) : (
-                      <Button 
-                        variant="destructive" 
+                      <Button
+                        variant="destructive"
                         onClick={stopRecording}
-                      >
+                        >
                         <Square className="h-4 w-4 mr-2" />
                         Parar Gravação
                       </Button>
                     )}
                     {audioBlob && !isRecording && (
-                      <Button 
+                      <Button
                         onClick={processAudio}
-                        disabled={isProcessing}
+                        disabled={isProcessing || isReadOnly}
                       >
                         {isProcessing ? (
                           <>
@@ -522,7 +888,7 @@ export default function ConsultaDetalhesV2() {
                     <Button
                       variant="outline"
                       onClick={handleSyncHma}
-                      disabled={isSyncing || !anamnese.queixaPrincipal}
+                      disabled={isSyncing || !anamnese.queixaPrincipal || isReadOnly}
                     >
                       {isSyncing ? (
                         <>
@@ -536,9 +902,9 @@ export default function ConsultaDetalhesV2() {
                         </>
                       )}
                     </Button>
-                    <Button 
-                      onClick={handleSaveAnamnese} 
-                      disabled={updateConsultaMutation.isPending}
+                    <Button
+                      onClick={handleSaveAnamnese}
+                      disabled={updateConsultaMutation.isPending || isReadOnly}
                       variant={hasUnsavedChanges ? "default" : "outline"}
                       className={hasUnsavedChanges ? "bg-orange-600 hover:bg-orange-700" : ""}
                     >
@@ -554,6 +920,7 @@ export default function ConsultaDetalhesV2() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                <fieldset disabled={isReadOnly} className={isReadOnly ? "opacity-60 cursor-not-allowed" : ""}>
                 {isRecording && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
                     <div className="h-3 w-3 bg-red-500 rounded-full animate-pulse"></div>
@@ -659,77 +1026,388 @@ export default function ConsultaDetalhesV2() {
                     />
                   </div>
                 </div>
+                </fieldset>
               </CardContent>
             </Card>
           )}
 
           {abaAtiva === "exame-fisico" && (
-            <AbaExameFisico consultaId={consultaId} />
+            <div className={isReadOnly ? "pointer-events-none opacity-60" : ""}>
+              <AbaExameFisico consultaId={consultaId} />
+            </div>
           )}
 
-          {abaAtiva === "hipoteses" && (
-            <AbaHipotesesConduta consultaId={consultaId} />
-          )}
-
-          {abaAtiva === "perfil-met" && consulta?.pacienteId && (
-            <AbaPerfilMetabolico
-              consultaId={consultaId}
-              pacienteId={consulta.pacienteId}
-            />
+          {abaAtiva === "seguimento" && (
+            <div className={isReadOnly ? "pointer-events-none opacity-60" : ""}>
+              <AbaHipotesesConduta consultaId={consultaId} readOnly={isReadOnly} />
+            </div>
           )}
 
           {abaAtiva === "resumo" && (
-            <AbaResumoEvolutivo consultaId={consultaId} />
+            <div className={isReadOnly ? "pointer-events-none opacity-60" : ""}>
+              <AbaResumoEvolutivo consultaId={consultaId} />
+            </div>
           )}
 
-          {abaAtiva === "perfil-met" && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Perfil Metabólico</CardTitle>
-                  <Button variant="outline" size="sm">
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Atualizar com IA
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-600">Conteúdo da aba Perfil Metabólico...</p>
-              </CardContent>
-            </Card>
+          {abaAtiva === "perfil-met" && consulta && paciente && (
+            <AbaPerfilMetabolico
+              consultaId={consultaId}
+              pacienteId={consulta.pacienteId}
+              onSyncIA={handleSyncHma}
+              syncingIA={isSyncing || syncConsultaCompletaMutation.isPending}
+            />
           )}
 
-          {abaAtiva === "exames" && (
+                  {abaAtiva === "exames" && (
             <Card>
               <CardHeader>
                 <CardTitle>Exames Laboratoriais</CardTitle>
-                <CardDescription>Upload e visualização de exames laboratoriais</CardDescription>
+                <CardDescription>Cadastro rápido e visualização dos exames do paciente</CardDescription>
+                {exameEmEdicaoId && (
+                  <div className="text-sm text-amber-600 font-medium">Editando exame #{exameEmEdicaoId} — salve ou cancele para sair do modo de edição</div>
+                )}
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                    <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">Upload de Exames</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Faça upload de PDFs ou imagens de exames laboratoriais para extração automática de dados
-                    </p>
-                    <Button variant="outline" onClick={() => toast.info("Funcionalidade em desenvolvimento")}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Fazer Upload de Exame
-                    </Button>
+              <CardContent className="space-y-6">
+                <fieldset disabled={isReadOnly} className={isReadOnly ? "opacity-60 cursor-not-allowed" : ""}>
+                <form onSubmit={handleSalvarExame} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dataExame">Data do exame</Label>
+                      <Input
+                        id="dataExame"
+                        type="date"
+                        value={novoExame.dataExame}
+                        onChange={(e) => setNovoExame({ ...novoExame, dataExame: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="tipo">Tipo</Label>
+                      <Input
+                        id="tipo"
+                        placeholder="Ex: Perfil lipídico, HbA1c, TSH"
+                        value={novoExame.tipo}
+                        onChange={(e) => setNovoExame({ ...novoExame, tipo: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="laboratorio">Laboratório</Label>
+                      <Input
+                        id="laboratorio"
+                        placeholder="Nome do laboratório"
+                        value={novoExame.laboratorio}
+                        onChange={(e) => setNovoExame({ ...novoExame, laboratorio: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="pdfUrl">PDF ou link</Label>
+                      <Input
+                        id="pdfUrl"
+                        placeholder="URL para o PDF ou imagem do exame"
+                        value={novoExame.pdfUrl}
+                        onChange={(e) => setNovoExame({ ...novoExame, pdfUrl: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="textoExames">Exames digitados (texto livre)</Label>
+                      <Textarea
+                        id="textoExames"
+                        rows={3}
+                        placeholder="Ex: Hemoglobina: 13.2 g/dL\nRDW: 14 %"
+                        value={textoExamesDigitados}
+                        onChange={(e) => setTextoExamesDigitados(e.target.value)}
+                      />
+                      <Button type="button" variant="outline" size="sm" onClick={handleEnviarTextoParaIA}>
+                        <Sparkles className="h-4 w-4 mr-2" /> Enviar à IA
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="arquivoExame">Upload para IA (imagem/PDF)</Label>
+                      <Input
+                        id="arquivoExame"
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={(e) => setArquivoExame(e.target.files?.[0] || null)}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!arquivoExame || isProcessandoExame}
+                          onClick={handleProcessarExameComIA}
+                        >
+                          {isProcessandoExame ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                          Enviar p/ IA
+                        </Button>
+                        {arquivoExame && <span className="text-xs text-gray-500 truncate">{arquivoExame.name}</span>}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="text-sm text-gray-500 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="font-semibold mb-2">💡 Próximas funcionalidades:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Upload de PDFs e imagens de exames</li>
-                      <li>Extração automática de valores com IA</li>
-                      <li>Tabela editável de resultados</li>
-                      <li>Gráficos de evolução temporal</li>
-                      <li>Comparação com exames anteriores</li>
-                    </ul>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-base">Resultados digitados</Label>
+                        <p className="text-xs text-gray-500">Preencha valores manualmente quando o PDF não estiver disponível</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setMostrarTabelaEditavel((prev) => !prev)}
+                        >
+                          {mostrarTabelaEditavel ? "Ocultar tabela" : "Abrir tabela editável"}
+                        </Button>
+                        {mostrarTabelaEditavel && (
+                          <Button type="button" variant="outline" size="sm" onClick={handleAddResultado}>
+                            <Plus className="h-4 w-4 mr-2" /> Linha
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {!mostrarTabelaEditavel ? (
+                      <p className="text-xs text-gray-500">
+                        Clique em "Abrir tabela editável" para revisar ou ajustar os parâmetros extraídos pela IA antes de salvar.
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border border-dashed border-gray-200">
+                        <table className="min-w-full text-left text-xs">
+                          <thead className="bg-gray-50 text-gray-600">
+                            <tr>
+                              <th className="px-3 py-2">ID</th>
+                              <th className="px-3 py-2">Parâmetro</th>
+                              <th className="px-3 py-2">Valor</th>
+                              <th className="px-3 py-2">Unidade</th>
+                              <th className="px-3 py-2">Referência</th>
+                              <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {resultadosDigitados.map((resultado, index) => (
+                              <tr key={index} className="align-top">
+                                <td className="px-3 py-2 text-gray-500">{resultado.id ?? "-"}</td>
+                                <td className="px-3 py-2 w-[200px]">
+                                  <Input
+                                    placeholder="Ex: Glicemia de jejum"
+                                    value={resultado.parametro}
+                                    onChange={(e) => handleUpdateResultado(index, "parametro", e.target.value)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 w-[120px]">
+                                  <Input
+                                    placeholder="Ex: 110"
+                                    value={resultado.valor}
+                                    onChange={(e) => handleUpdateResultado(index, "valor", e.target.value)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 w-[120px]">
+                                  <Input
+                                    placeholder="mg/dL"
+                                    value={resultado.unidade}
+                                    onChange={(e) => handleUpdateResultado(index, "unidade", e.target.value)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 w-[140px]">
+                                  <Input
+                                    placeholder="70 - 99"
+                                    value={resultado.referencia}
+                                    onChange={(e) => handleUpdateResultado(index, "referencia", e.target.value)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 w-[140px]">
+                                  <select
+                                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                                    value={resultado.status}
+                                    onChange={(e) => handleUpdateResultado(index, "status", e.target.value)}
+                                  >
+                                    <option value="normal">Normal</option>
+                                    <option value="alterado">Alterado</option>
+                                    <option value="critico">Crítico</option>
+                                  </select>
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {resultadosDigitados.length > 1 && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleRemoveResultado(index)}
+                                    >
+                                      Remover
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="observacoes">Observações</Label>
+                    <Textarea
+                      id="observacoes"
+                      rows={3}
+                      placeholder="Valores relevantes, suspeitas ou observações livres"
+                      value={novoExame.observacoes}
+                      onChange={(e) => setNovoExame({ ...novoExame, observacoes: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    {exameEmEdicaoId && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setExameEmEdicaoId(null);
+                          setNovoExame({ tipo: "", dataExame: "", laboratorio: "", pdfUrl: "", imagemUrl: "", observacoes: "" });
+                          setResultadosDigitados([{ id: undefined, parametro: "", valor: "", unidade: "", referencia: "", status: "normal" }]);
+                        }}
+                      >
+                        Cancelar edição
+                      </Button>
+                    )}
+                    <Button type="submit" disabled={salvandoExame}>
+                      {salvandoExame ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          {exameEmEdicaoId ? <CheckCircle className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                          {exameEmEdicaoId ? "Atualizar exame" : "Adicionar exame"}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </form>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gray-700">Histórico recente</h3>
+                    {carregandoExames && (
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Carregando
+                      </div>
+                    )}
+                  </div>
+
+                  {!examesPaciente || examesPaciente.length === 0 ? (
+                    <div className="text-center text-gray-500 py-6">
+                      Nenhum exame cadastrado para este paciente.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {examesPaciente.map((exame) => (
+                        <Card key={exame.id} className="border border-gray-200">
+                          <CardHeader className="pb-2">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <CardTitle className="text-base">{exame.tipo || "Exame"}</CardTitle>
+                                <CardDescription>
+                                  {new Date(exame.dataExame).toLocaleDateString("pt-BR")}
+                                  {exame.laboratorio ? ` • ${exame.laboratorio}` : ""}
+                                </CardDescription>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {exame.pdfUrl && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => exame.pdfUrl && window.open(exame.pdfUrl, "_blank")}
+                                  >
+                                    Ver arquivo
+                                  </Button>
+                                )}
+                                <Button variant="ghost" size="sm" onClick={() => handleEditarExame(exame)}>
+                                  Editar
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-600"
+                                  onClick={() => handleRemoverExame(exame.id)}
+                                >
+                                  Remover
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          {exame.observacoes && (
+                            <CardContent className="text-sm text-gray-700 whitespace-pre-line">
+                              {exame.observacoes}
+                            </CardContent>
+                          )}
+                          {Array.isArray(exame.resultados) && exame.resultados.length > 0 && (
+                            <ExameResultadosTable resultados={exame.resultados} compact />
+                          )}
+                        </Card>
+                      ))}
+                      {seriesEvolucao.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-semibold text-gray-800">Gráficos comparativos</h4>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setMostrarGraficosExames((prev) => !prev)}
+                            >
+                              {mostrarGraficosExames ? "Ocultar gráficos" : "Ver gráficos"}
+                            </Button>
+                          </div>
+                          {mostrarGraficosExames && (
+                            <div className="grid md:grid-cols-2 gap-4">
+                              {seriesEvolucao.map((serie, idx) => {
+                                const ultimo = serie.pontos[serie.pontos.length - 1];
+                                const cores = ["#2563eb", "#16a34a", "#f59e0b", "#8b5cf6", "#ec4899", "#0ea5e9"];
+                                const cor = cores[idx % cores.length];
+                                return (
+                                  <Card key={serie.id} className="border border-gray-100 shadow-sm">
+                                    <CardHeader className="pb-2">
+                                      <CardTitle className="text-sm">{serie.parametro}</CardTitle>
+                                      {serie.unidadeBase && (
+                                        <CardDescription>Unidade base: {serie.unidadeBase}</CardDescription>
+                                      )}
+                                    </CardHeader>
+                                    <CardContent>
+                                      <EvolutionChart
+                                        data={serie.pontos.map((p) => ({ date: p.data, value: p.valor }))}
+                                        label={serie.parametro}
+                                        color={cor}
+                                        unit={serie.unidadeBase || serie.unidade || ""}
+                                        title={`Evolução de ${serie.parametro}`}
+                                        warning={serie.avisoUnidade}
+                                      />
+                                      <div className="mt-3 text-xs text-gray-600">
+                                        Último valor: <strong>{ultimo.valor.toString()}</strong>
+                                        {serie.unidadeBase ? ` ${serie.unidadeBase}` : ""} em {new Date(ultimo.data).toLocaleDateString("pt-BR")}
+                                      </div>
+                                    </CardContent>
+                                  </Card>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
+                </fieldset>
               </CardContent>
             </Card>
           )}
@@ -741,6 +1419,79 @@ export default function ConsultaDetalhesV2() {
                 <CardDescription>Gerar receitas, atestados, pedidos de exames e relatórios</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div className="flex items-center gap-3">
+                  <Label className="text-sm font-medium">Assinatura:</Label>
+                  <Select
+                    value={assinaturaDocumento}
+                    onValueChange={(value) => setAssinaturaDocumento(value as "digital" | "manual")}
+                  >
+                    <SelectTrigger className="w-52">
+                      <SelectValue placeholder="Tipo de assinatura" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="digital">Assinar digitalmente</SelectItem>
+                      <SelectItem value="manual">Assinar manualmente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-gray-500">
+                    Escolha se o documento será emitido com assinatura digital ou para impressão manual.
+                  </span>
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-dashed border-gray-200 p-4 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-sm">Plano Terapêutico Singular (PTS)</h3>
+                      <p className="text-xs text-gray-600">
+                        Gere o PTS com a IA Mestra, edite e salve como documento do paciente.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleGerarPTS}
+                        disabled={gerarPtsMutation.isPending || isReadOnly}
+                      >
+                        {gerarPtsMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4 mr-2" /> Gerar PTS (IA)
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        onClick={handleSalvarPTS}
+                        disabled={salvarPtsMutation.isPending || !ptsConteudo || isReadOnly}
+                      >
+                        {salvarPtsMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando
+                          </>
+                        ) : (
+                          "Salvar PTS"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  <Textarea
+                    rows={10}
+                    placeholder="O PTS gerado pela IA aparecerá aqui para revisão e ajustes."
+                    value={ptsConteudo}
+                    onChange={(e) => setPtsConteudo(e.target.value)}
+                    disabled={isReadOnly}
+                  />
+                  {ptsDocumentoId && (
+                    <p className="text-xs text-green-700">Documento salvo em rascunho (ID #{ptsDocumentoId}).</p>
+                  )}
+                </div>
                 {/* Grid de Botões de Documentos */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Botão Gerar Receita */}
@@ -954,7 +1705,64 @@ export default function ConsultaDetalhesV2() {
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-600">Conteúdo da aba Bioimpedância...</p>
+                {carregandoBio ? (
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando bioimpedâncias...
+                  </div>
+                ) : !bioimpedanciasPaciente || bioimpedanciasPaciente.length === 0 ? (
+                  <p className="text-gray-600">Nenhuma bioimpedância cadastrada para este paciente.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {bioimpedanciasPaciente.map((bio) => (
+                      <Card key={bio.id} className="border border-gray-200">
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <CardTitle className="text-base">{new Date(bio.dataAvaliacao).toLocaleDateString("pt-BR")}</CardTitle>
+                              <CardDescription>
+                                {bio.resultados?.peso ? `${bio.resultados.peso} kg` : "Peso não informado"}
+                              </CardDescription>
+                            </div>
+                            {bio.xlsUrl && (
+                              <Button variant="outline" size="sm" onClick={() => window.open(bio.xlsUrl, "_blank")}>
+                                <Download className="h-4 w-4 mr-2" />
+                                Ver arquivo
+                              </Button>
+                            )}
+                          </div>
+                        </CardHeader>
+                        {bio.resultados && (
+                          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-gray-700">
+                            {bio.resultados.percentualGordura && (
+                              <div>
+                                <div className="font-semibold">% Gordura</div>
+                                <div>{bio.resultados.percentualGordura}%</div>
+                              </div>
+                            )}
+                            {bio.resultados.massaMuscular && (
+                              <div>
+                                <div className="font-semibold">Massa Muscular</div>
+                                <div>{bio.resultados.massaMuscular} kg</div>
+                              </div>
+                            )}
+                            {bio.resultados.imc && (
+                              <div>
+                                <div className="font-semibold">IMC</div>
+                                <div>{bio.resultados.imc}</div>
+                              </div>
+                            )}
+                            {bio.resultados.aguaCorporalTotal && (
+                              <div>
+                                <div className="font-semibold">Água corporal</div>
+                                <div>{bio.resultados.aguaCorporalTotal} L</div>
+                              </div>
+                            )}
+                          </CardContent>
+                        )}
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
