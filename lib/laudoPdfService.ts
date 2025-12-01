@@ -1,6 +1,6 @@
 import { laudoSchema, type Laudo } from "../laudoSchema";
 import { convertSVGtoPDF } from "../svgProcessor";
-import { storagePut } from "../storage";
+import { uploadPdfBuffer } from "../storage";
 
 function escapeHtml(text: string): string {
   return text
@@ -92,11 +92,11 @@ export async function generateLaudoPDF(laudo: Laudo): Promise<{
   const fileName = `laudo-${parsed.paciente.id}-${timestamp}.pdf`;
   const fileKey = `documentos/${parsed.paciente.id}/${fileName}`;
 
-  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+  const { pdfUrl, pdfPath } = await uploadPdfBuffer(fileKey, pdfBuffer);
 
   return {
     pdfUrl,
-    pdfPath: fileKey,
+    pdfPath,
     html: htmlContent,
   };
 }

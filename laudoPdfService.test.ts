@@ -5,9 +5,17 @@ vi.mock(new URL('./svgProcessor.ts', import.meta.url).pathname, () => ({
   convertSVGtoPDF: vi.fn(async () => Buffer.from('pdf')),
 }));
 
-vi.mock(new URL('./storage.ts', import.meta.url).pathname, () => ({
-  storagePut: vi.fn(async (key: string) => ({ url: `https://mock.storage/${key}` })),
-}));
+vi.mock(new URL('./storage.ts', import.meta.url).pathname, () => {
+  const storagePut = vi.fn(async (key: string) => ({ url: `https://mock.storage/${key}` }));
+
+  return {
+    storagePut,
+    uploadPdfBuffer: vi.fn(async (key: string, buffer: Buffer) => {
+      await storagePut(key, buffer, 'application/pdf');
+      return { pdfUrl: `https://mock.storage/${key}`, pdfPath: key };
+    }),
+  };
+});
 
 const baseLaudo = {
   paciente: { id: 99, nome: 'Paciente Teste' },
