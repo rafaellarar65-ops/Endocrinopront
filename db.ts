@@ -8,6 +8,7 @@ import {
   examesLaboratoriais,
   bioimpedancias,
   escoresClinicos,
+  escoreModulos,
   planosTerapeuticos,
   templates,
   documentos,
@@ -25,6 +26,8 @@ import {
   type InsertBioimpedancia,
   type EscoreClinico,
   type InsertEscoreClinico,
+  type EscoreModulo,
+  type InsertEscoreModulo,
   type PlanoTerapeutico,
   type InsertPlanoTerapeutico,
   type Template,
@@ -33,7 +36,7 @@ import {
   type InsertDocumento,
   type IndicadorMetabolico,
   type InsertIndicadorMetabolico,
-} from "../drizzle/schema";
+} from "./schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -255,9 +258,27 @@ export async function createExameLaboratorial(data: InsertExameLaboratorial): Pr
 
   const result = await db.insert(examesLaboratoriais).values(data);
   const insertedId = Number(result[0].insertId);
-  
+
   const inserted = await db.select().from(examesLaboratoriais).where(eq(examesLaboratoriais.id, insertedId)).limit(1);
   return inserted[0]!;
+}
+
+export async function updateExameLaboratorial(id: number, data: Partial<InsertExameLaboratorial>): Promise<ExameLaboratorial | undefined> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(examesLaboratoriais).set(data).where(eq(examesLaboratoriais.id, id));
+
+  const updated = await db.select().from(examesLaboratoriais).where(eq(examesLaboratoriais.id, id)).limit(1);
+  return updated[0];
+}
+
+export async function deleteExameLaboratorial(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.delete(examesLaboratoriais).where(eq(examesLaboratoriais.id, id));
+  return (result[0] as any)?.affectedRows > 0;
 }
 
 export async function getExamesByPaciente(pacienteId: number) {
@@ -336,6 +357,25 @@ export async function getEscoresByPaciente(pacienteId: number) {
   return await db.select().from(escoresClinicos)
     .where(eq(escoresClinicos.pacienteId, pacienteId))
     .orderBy(desc(escoresClinicos.dataCalculo));
+}
+
+// ========== CATÁLOGO DE ESCORES ==========
+
+export async function createEscoreModulo(data: InsertEscoreModulo): Promise<EscoreModulo> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(escoreModulos).values(data);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(escoreModulos).where(eq(escoreModulos.id, insertedId)).limit(1);
+  return inserted[0]!;
+}
+
+export async function listEscoreModulos(): Promise<EscoreModulo[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(escoreModulos).orderBy(desc(escoreModulos.createdAt));
 }
 
 // ========== PLANOS TERAPÊUTICOS ==========

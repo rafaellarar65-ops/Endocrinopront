@@ -1,5 +1,12 @@
 # TODO - Prontuário Médico Inteligente - Endocrinologia
 
+## Próximos passos imediatos (prioridade)
+- [ ] Exercitar fluxo completo de exames laboratoriais com IA + upload S3, incluindo reprocessamento em caso de falha e normalização de parâmetros com IDs determinísticos.
+- [ ] Permitir edição e exclusão de pacotes de exames diretamente na tabela evolutiva, atualizando gráficos e histórico após cada alteração.
+- [ ] Adicionar teste ponta a ponta (tRPC + renderização) cobrindo criação, upload, edição e remoção de exames, incluindo parâmetros com acentuação para validar geração de IDs.
+- [ ] Expandir gráficos evolutivos para aceitar séries multi-unidade (ex.: glicemia mg/dL vs mmol/L) com conversão e aviso de unidade mista.
+- [ ] Revisar seção de áudios do paciente para listar duração e data/hora da gravação e permitir download por consulta.
+
 ## Fase 1: Arquitetura e Planejamento
 - [x] Analisar requisitos completos do sistema
 - [x] Definir arquitetura macro (Frontend/Backend/IA/Infra)
