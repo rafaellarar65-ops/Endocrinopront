@@ -79,6 +79,168 @@ export default function PacienteDetalhes() {
     { enabled: isAuthenticated && pacienteId > 0 }
   );
 
+  const timelineEventos = useMemo(() => {
+    const eventos: Array<{
+      data: string;
+      tipo: "consulta" | "exame" | "bioimpedancia";
+      titulo: string;
+      descricao?: string;
+      badge?: string;
+    }> = [];
+
+    consultas?.forEach((consulta) => {
+      const dataReferencia = consulta.dataHora || consulta.createdAt || new Date();
+      const soapPartes = [
+        consulta.anamnese?.queixaPrincipal
+          ? `S: ${consulta.anamnese.queixaPrincipal}`
+          : undefined,
+        consulta.exameFisico?.exameGeral
+          ? `O: ${consulta.exameFisico.exameGeral}`
+          : undefined,
+        consulta.hipotesesDiagnosticas ? `A: ${consulta.hipotesesDiagnosticas}` : undefined,
+        consulta.conduta ? `P: ${consulta.conduta}` : undefined,
+      ].filter(Boolean);
+
+      eventos.push({
+        data: dataReferencia as unknown as string,
+        tipo: "consulta",
+        titulo: `Consulta ${new Date(dataReferencia).toLocaleDateString("pt-BR")}`,
+        descricao: soapPartes.join(" | ") || "Sem notas SOAP registradas.",
+        badge: consulta.status === "concluida" ? "Finalizada" : "Em aberto",
+      });
+
+      if (consulta.conduta) {
+        const texto = consulta.conduta.toLowerCase();
+        if (/inicia|introduz/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Marco: Início de medicação",
+            descricao: consulta.conduta,
+            badge: "Marco",
+          });
+        }
+        if (/aumenta|reduz|ajusta/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Marco: Ajuste de dose",
+            descricao: consulta.conduta,
+            badge: "Dose",
+          });
+        }
+        if (/evento adverso|efeito colateral|reacao/.test(texto)) {
+          eventos.push({
+            data: dataReferencia as unknown as string,
+            tipo: "consulta",
+            titulo: "Evento adverso",
+            descricao: consulta.conduta,
+            badge: "Alerta",
+          });
+        }
+      }
+    });
+
+    exames?.forEach((exame) => {
+      eventos.push({
+        data: exame.dataExame as unknown as string,
+        tipo: "exame",
+        titulo: `Exame ${exame.tipo || "Laboratorial"}`,
+        descricao: `${exame.resultados?.length || 0} resultados registrados`,
+        badge: "Exame",
+      });
+    });
+
+    bioimpedancias?.forEach((bio) => {
+      eventos.push({
+        data: bio.dataAvaliacao as unknown as string,
+        tipo: "bioimpedancia",
+        titulo: "Bioimpedância",
+        descricao: bio.observacoes || "Avaliação corporal registrada",
+        badge: "Composição",
+      });
+    });
+
+    return eventos.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+  }, [bioimpedancias, consultas, exames]);
+
+  const comparacaoExames = useMemo(() => {
+    return seriesEvolucao
+      .map((serie) => {
+        const ultimo = serie.pontos[serie.pontos.length - 1];
+        const penultimo = serie.pontos[serie.pontos.length - 2];
+        if (!ultimo || !penultimo) return null;
+        const delta = ultimo.valor - penultimo.valor;
+        return {
+          parametro: serie.parametro,
+          atual: `${ultimo.valor.toFixed(2)} ${serie.unidadeBase || ""}`,
+          anterior: `${penultimo.valor.toFixed(2)} ${serie.unidadeBase || ""}`,
+          dataAtual: new Date(ultimo.data).toLocaleDateString("pt-BR"),
+          dataAnterior: new Date(penultimo.data).toLocaleDateString("pt-BR"),
+          tendencia: delta > 0 ? "alta" : delta < 0 ? "queda" : "estavel",
+          aviso: serie.avisoUnidade,
+        };
+      })
+      .filter(Boolean);
+  }, [seriesEvolucao]);
+
+  const aderencia = useMemo(() => {
+    if (!consultas || consultas.length === 0) return { percentual: 0, descricao: "Sem consultas registradas" };
+    const concluidas = consultas.filter((c) => c.status === "concluida").length;
+    const percentual = Math.round((concluidas / consultas.length) * 100);
+    return {
+      percentual,
+      descricao: `${concluidas} de ${consultas.length} consultas finalizadas`,
+    };
+  }, [consultas]);
+
+  const pesoData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.peso ? ind.peso / 1000 : null,
+      })),
+    [indicadores]
+  );
+
+  const imcData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.imc ? ind.imc / 100 : null,
+      })),
+    [indicadores]
+  );
+
+  const glicemiaData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.glicemiaJejum ?? null,
+      })),
+    [indicadores]
+  );
+
+  const hba1cData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.hemoglobinaGlicada ? ind.hemoglobinaGlicada / 100 : null,
+      })),
+    [indicadores]
+  );
+
+  const paData = useMemo(
+    () =>
+      (indicadores || []).map((ind) => ({
+        date: ind.dataAvaliacao ? new Date(ind.dataAvaliacao).toISOString() : "",
+        value: ind.pressaoArterialSistolica && ind.pressaoArterialDiastolica
+          ? ind.pressaoArterialSistolica / 10 + ind.pressaoArterialDiastolica / 100
+          : null,
+      })),
+    [indicadores]
+  );
+
   const updateMutation = trpc.pacientes.update.useMutation({
     onSuccess: () => {
       toast.success("Paciente atualizado com sucesso!");
@@ -312,7 +474,7 @@ export default function PacienteDetalhes() {
 
         {/* Tabs */}
         <Tabs defaultValue="info" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="info">Informações</TabsTrigger>
             <TabsTrigger value="consultas">Consultas</TabsTrigger>
             <TabsTrigger value="exames">Exames</TabsTrigger>
@@ -320,6 +482,7 @@ export default function PacienteDetalhes() {
             <TabsTrigger value="bioimpedancia">Bioimpedância</TabsTrigger>
             <TabsTrigger value="documentos">Documentos</TabsTrigger>
             <TabsTrigger value="indicadores">Indicadores</TabsTrigger>
+            <TabsTrigger value="evolucao">Evolução</TabsTrigger>
           </TabsList>
 
           {/* Aba Informações */}
@@ -1036,6 +1199,115 @@ export default function PacienteDetalhes() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Aba Evolução e Acompanhamento */}
+          <TabsContent value="evolucao">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Timeline de evolução</CardTitle>
+                      <CardDescription>Consultas, exames, bioimpedância e marcos clínicos</CardDescription>
+                    </div>
+                    <Badge variant="outline">Aderência {aderencia.percentual}%</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {timelineEventos.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">Sem eventos para exibir</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {timelineEventos.map((evento, index) => (
+                        <div key={`${evento.tipo}-${index}`} className="flex gap-3 items-start">
+                          <div className="w-20 text-xs text-gray-500 pt-1">
+                            {new Date(evento.data).toLocaleDateString("pt-BR")}
+                          </div>
+                          <div className="flex-1 border-l pl-4 pb-4">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">{evento.titulo}</Badge>
+                              {evento.badge && <Badge variant="outline">{evento.badge}</Badge>}
+                            </div>
+                            <p className="text-sm text-gray-700 mt-1">{evento.descricao}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Gráficos de evolução</CardTitle>
+                  <CardDescription>Peso, IMC, glicemia, HbA1c e pressão arterial</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <EvolutionChart data={pesoData} label="Peso" color="#2563eb" unit="kg" title="Peso" />
+                    <EvolutionChart data={imcData} label="IMC" color="#7c3aed" unit="kg/m²" title="IMC" />
+                    <EvolutionChart data={glicemiaData} label="Glicemia" color="#f59e0b" unit="mg/dL" title="Glicemia de Jejum" />
+                    <EvolutionChart data={hba1cData} label="HbA1c" color="#ef4444" unit="%" title="Hemoglobina Glicada" />
+                    <EvolutionChart data={paData} label="PA" color="#10b981" unit="mmHg" title="Pressão Arterial" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Comparação de exames recentes</CardTitle>
+                  <CardDescription>Diferenças entre os dois últimos pontos de cada parâmetro</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(!comparacaoExames || comparacaoExames.length === 0) && (
+                    <div className="text-sm text-gray-500">Sem séries suficientes para comparar.</div>
+                  )}
+                  {comparacaoExames?.map((comp, idx) => (
+                    <div key={`${comp?.parametro}-${idx}`} className="p-4 rounded-lg border bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-gray-800">{comp?.parametro}</div>
+                        {comp?.tendencia === "alta" && <Badge variant="secondary">Em alta</Badge>}
+                        {comp?.tendencia === "queda" && <Badge variant="outline">Em queda</Badge>}
+                        {comp?.tendencia === "estavel" && <Badge variant="outline">Estável</Badge>}
+                      </div>
+                      <p className="text-sm text-gray-700 mt-1">
+                        Último: {comp?.atual} ({comp?.dataAtual}) • Anterior: {comp?.anterior} ({comp?.dataAnterior})
+                      </p>
+                      {comp?.aviso && (
+                        <p className="text-[11px] text-amber-700 mt-2 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                          {comp.aviso}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Indicadores de aderência</CardTitle>
+                  <CardDescription>Visão rápida de acompanhamento longitudinal</CardDescription>
+                </CardHeader>
+                <CardContent className="grid md:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Consultas finalizadas</p>
+                    <p className="text-3xl font-bold">{aderencia.percentual}%</p>
+                    <p className="text-xs text-gray-500">{aderencia.descricao}</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Exames registrados</p>
+                    <p className="text-3xl font-bold">{exames?.length || 0}</p>
+                    <p className="text-xs text-gray-500">Pacotes utilizados em séries evolutivas</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-white">
+                    <p className="text-sm text-gray-600">Bioimpedâncias</p>
+                    <p className="text-3xl font-bold">{bioimpedancias?.length || 0}</p>
+                    <p className="text-xs text-gray-500">Consideradas nos marcos do paciente</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
