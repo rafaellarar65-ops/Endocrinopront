@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Loader2, Sparkles, Save } from "lucide-react";
+import { SolicitacaoExamesModal } from "./SolicitacaoExamesModal";
 
 interface AbaSeguimentoProps {
   consultaId: number;
@@ -68,6 +69,8 @@ export function AbaHipotesesConduta({
     { nome: "", aplicacao: "", acordada: false },
   ]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [modalSolicitacaoAberto, setModalSolicitacaoAberto] = useState(false);
+  const [ultimaSolicitacaoGerada, setUltimaSolicitacaoGerada] = useState<string | null>(null);
 
   // Carrega valores iniciais
   useEffect(() => {
@@ -124,6 +127,24 @@ export function AbaHipotesesConduta({
     }
   };
 
+  const handleSolicitacaoGerada = (
+    resultado: { conteudo: string },
+    payload: { observacoes?: string }
+  ) => {
+    setUltimaSolicitacaoGerada(resultado.conteudo);
+    setHasUnsavedChanges(true);
+
+    if (payload.observacoes?.trim()) {
+      setOrientacoes((prev) =>
+        prev?.trim()
+          ? `${prev}\n\nObservações da solicitação de exames: ${payload.observacoes}`
+          : `Observações da solicitação de exames: ${payload.observacoes}`
+      );
+    }
+
+    toast.success("Solicitação de exames gerada.");
+  };
+
   if (!consulta) {
     return (
       <div className="text-center py-12 text-gray-500">
@@ -157,6 +178,15 @@ export function AbaHipotesesConduta({
                 Atualizar com IA
               </>
             )}
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setModalSolicitacaoAberto(true)}
+            disabled={readOnly}
+          >
+            Solicitar exames
           </Button>
 
           <Button
@@ -367,6 +397,31 @@ Justificativa breve de cada hipótese, quando pertinente.`}
           />
         </CardContent>
       </Card>
+
+      {ultimaSolicitacaoGerada && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Última solicitação de exames</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-600 mb-2">
+              Documento gerado diretamente da consulta. Revise antes de imprimir ou
+              compartilhar com o paciente.
+            </p>
+            <pre className="whitespace-pre-wrap text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3">
+              {ultimaSolicitacaoGerada}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+
+      <SolicitacaoExamesModal
+        open={modalSolicitacaoAberto}
+        onClose={() => setModalSolicitacaoAberto(false)}
+        onGenerate={(resultado, payload) => handleSolicitacaoGerada(resultado, payload)}
+        pacienteNome={consulta?.paciente?.nome ?? undefined}
+        consultaId={consulta?.id}
+      />
     </div>
   );
 }
