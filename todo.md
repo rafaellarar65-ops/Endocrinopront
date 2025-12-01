@@ -7,6 +7,11 @@
 - [ ] Expandir gráficos evolutivos para aceitar séries multi-unidade (ex.: glicemia mg/dL vs mmol/L) com conversão e aviso de unidade mista.
 - [ ] Revisar seção de áudios do paciente para listar duração e data/hora da gravação e permitir download por consulta.
 
+## Pendências em foco (prioridade média)
+- [ ] Planos terapêuticos: versões médico/paciente, editor HTML/Markdown, templates por condição, envio por WhatsApp/Email com registro de leitura, histórico de planos anteriores.
+- [ ] Timeline de evolução (Módulo 19): consolidar consultas, exames e BIA; notas SOAP estruturadas; marcos automáticos (início/ajuste de medicação, eventos adversos); filtros por período e tipo; comparação entre consultas e análise longitudinal.
+- [ ] Dashboard metabólico completo: consolidar BIA + exames + escores, velocímetros de risco, mini-infográficos, alertas automáticos de valores críticos, tendências e previsões, comparação com população de referência.
+
 ## Fase 1: Arquitetura e Planejamento
 - [x] Analisar requisitos completos do sistema
 - [x] Definir arquitetura macro (Frontend/Backend/IA/Infra)
