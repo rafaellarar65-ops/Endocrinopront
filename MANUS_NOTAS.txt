@@ -14,3 +14,10 @@ Como baixar/enviar os arquivos ao Manus
 - Se estiver trabalhando em outra máquina, faça clone e atualize a branch: git clone <repo-url> && cd Endocrinopront && git checkout work && git pull
 - Para revisar localmente antes de enviar, gere um pacote zip só com esta branch: git archive --format zip --output endocrino-atualizado.zip work
 - Para entregar via Manus (pipeline Git), faça push da branch work: git push origin work. Caso use upload manual na plataforma, envie o arquivo endocrino-atualizado.zip gerado acima.
+
+Checklist rápido antes de abrir/atualizar o PR no GitHub/Manus
+- Conferir se o status do git está limpo: git status -sb
+- Garantir que não há pasta node_modules/ ou outros arquivos grandes fora do .gitignore
+- Rodar pelo menos a suíte focal de exames ou a que sofreu alteração mais recente
+- Descrever no PR se testes não foram executados por limitação de ambiente
+- Após o push da branch work, confirmar se o pipeline automático do Manus/GitHub foi disparado
