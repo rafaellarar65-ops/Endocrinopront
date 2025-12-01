@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Relatório de Bioimpedância - V6 Clínico</title>
+  <style>
+    body { margin: 0; padding: 0; background:#eef1f7; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#1d1f26; }
+    .page { width:210mm; min-height:297mm; background:#fff; margin:0 auto; box-shadow:0 0 6px rgba(0,0,0,0.15); padding-bottom:16mm; }
+    .header { background:linear-gradient(135deg,#25467a,#1b3359); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+    .header-main-title {font-size:20px;font-weight:700;}
+    .header-sub {font-size:11px;opacity:0.9;}
+    .header-info {text-align:right;font-size:11px;}
+    .content {padding:18px 24px 24px 24px;font-size:12px;}
+    .section-title-bar { background:#cfd3dd; color:#333; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:600; margin:10px 0 6px 0; }
+    .card { background:#fff; border-radius:12px; border:1px solid #dde1ec; padding:10px 12px; margin-bottom:10px; }
+    .grid-2 {display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .grid-3 {display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+    .field-label {font-size:11px;color:#6a6f80;}
+    .field-value {font-size:14px;font-weight:600;color:#222;margin-top:1px;}
+    .mini-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px;}
+    .mini-box {background:#f6f7ff;border-radius:8px;padding:4px 6px;}
+    .mini-label {font-size:10px;color:#6b6f85;}
+    .mini-value {font-size:12px;font-weight:600;color:#253553;}
+    .range-row { display:grid; grid-template-columns:150px 1fr 50px; align-items:center; font-size:11px; margin-bottom:5px; gap:6px; }
+    .range-shell { position:relative; width:100%;height:10px;border-radius:999px; background:linear-gradient(90deg,#f97373 0%,#fbbf24 35%,#34d399 70%,#22c55e 100%); overflow:hidden; }
+    .range-marker { position:absolute;top:-3px;width:2px;height:16px;background:#111;border-radius:2px; }
+    .bodymaps {display:flex;justify-content:space-around;gap:20px;margin-top:6px;}
+    .bodymaps-col {text-align:center;font-size:11px;}
+    .bodymaps svg {max-height:220px;}
+    .evo-chart img { width:100%; height:auto; max-height:150px; display:block; margin-bottom:4px; }
+    .obs-box { border-radius:12px; border:1px dashed #ccd3e3; background:#fafcff; padding:10px 12px; white-space:pre-wrap; margin-top:4px; }
+    .footer-sign {margin-top:18px;text-align:center;font-size:11px;color:#444;}
+    .footer-line {width:220px;height:1px;background:#222;margin:0 auto 4px auto;}
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div><div class="header-main-title">Relatório de Bioimpedância</div><div class="header-sub">Análise corporal avançada · V6 clínico</div></div>
+    <div class="header-info"><div><strong>{{examDate}}</strong></div><div>Dr. Rafael Lara — CRM/MG 89620</div></div>
+  </div>
+  <div class="content">
+    <div class="section-title-bar">Identificação</div>
+    <div class="grid-3">
+      <div class="card"><div class="field-label">Nome</div><div class="field-value">{{patientName}}</div></div>
+      <div class="card"><div class="field-label">Idade</div><div class="field-value">{{ageYears}} anos</div></div>
+      <div class="card"><div class="field-label">Altura</div><div class="field-value">{{heightCm}} cm</div></div>
+    </div>
+    <div class="section-title-bar">Resumo corporal</div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="field-label">Peso atual</div><div class="field-value">{{weightKg}} kg</div>
+        <div class="field-label" style="margin-top:6px;">IMC</div><div class="field-value">{{imc}} kg/m²</div>
+        <div class="field-label" style="margin-top:6px;">% gordura</div><div class="field-value">{{fatPercent}}%</div>
+        <div class="mini-grid">
+          <div class="mini-box"><div class="mini-label">Meta</div><div class="mini-value">{{targetWeightKg}} kg</div></div>
+          <div class="mini-box"><div class="mini-label">Controle Gord.</div><div class="mini-value">{{fatControlKg}} kg</div></div>
+          <div class="mini-box"><div class="mini-label">Controle Musc.</div><div class="mini-value">{{muscleControl}}</div></div>
+        </div>
+      </div>
+      <div class="card"><div class="field-label">Radar clínico</div><img src="data:image/png;base64,{{radarPng}}" style="width:100%;height:auto;max-height:180px;margin-top:4px;" /></div>
+    </div>
+    <div class="section-title-bar">Composição</div>
+    <div class="card">
+      <div class="grid-2">
+        <div>
+          <div class="range-row"><div>Água total (kg)</div><div class="range-shell"><div class="range-marker" style="left:50%;"></div></div><div style="text-align:right;">{{totalBodyWaterKg}}</div></div>
+          <div class="range-row"><div>Massa gorda (kg)</div><div class="range-shell"><div class="range-marker" style="left:{{fatPercent}}%;"></div></div><div style="text-align:right;">{{fatKg}}</div></div>
+          <div class="range-row"><div>Massa livre gordura</div><div class="range-shell"><div class="range-marker" style="left:60%;"></div></div><div style="text-align:right;">{{fatFreeMassKg}}</div></div>
+        </div>
+        <div>
+          <div class="field-label">Massa muscular esquelética (kg)</div><div class="field-value">{{skeletalMuscleMassKg}} kg</div>
+          <div class="field-label" style="margin-top:4px;">Percentual (%)</div><div class="field-value">{{skeletalMusclePercent}}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-title-bar">Distribuição segmentar</div>
+    <div class="card bodymaps">
+      <div class="bodymaps-col"><div style="font-weight:600;margin-bottom:4px;">Gordura</div>{{fatBodymapSvg}}</div>
+      <div class="bodymaps-col"><div style="font-weight:600;margin-bottom:4px;">Músculo</div>{{muscleBodymapSvg}}</div>
+    </div>
+    <div class="section-title-bar">Evolução</div>
+    <div class="card evo-chart">
+      <img src="data:image/png;base64,{{evolutionWeightPng}}" />
+      <img src="data:image/png;base64,{{evolutionFatPercentPng}}" />
+    </div>
+    <div class="section-title-bar">Interpretação e Conduta</div>
+    <div class="obs-box">{{interpretation}}</div>
+    <div class="obs-box" style="margin-top:10px;">{{plan}}</div>
+    <div class="footer-sign"><div class="footer-line"></div>Dr. Rafael Lara — CRM/MG 89620</div>
+  </div>
+</div>
+</body>
+</html>
