@@ -2,8 +2,9 @@
  * Serviço para gerar documentos médicos (receituários, bioimpedância, etc.)
  */
 
-import { fillReceituarioSVG, fillBioimpedanciaSVG, convertSVGtoPDF, type ReceituarioData, type BioimpedanciaData } from "./svgProcessor";
+import { fillBioimpedanciaSVG, convertSVGtoPDF, type BioimpedanciaData } from "./svgProcessor";
 import { storagePut } from "../storage";
+import { gerarPrescricaoPdf } from "./lib/prescricaoPdfService";
 
 export interface GenerateReceituarioParams {
   pacienteNome: string;
@@ -55,20 +56,25 @@ export async function generateReceituarioPDF(
   params: GenerateReceituarioParams,
   pacienteId: number
 ): Promise<{ pdfUrl: string; pdfPath: string }> {
-  // Preparar dados para o template
-  const data: ReceituarioData = {
-    nomePaciente: params.pacienteNome,
-    data: params.data,
-    assinaturaTipo: params.assinaturaTipo,
-    medicamentos: params.medicamentos,
-    instrucoesAdicionais: params.instrucoesAdicionais,
-  };
-
-  // Preencher SVG com dados
-  const svgContent = await fillReceituarioSVG(data);
-
-  // Converter para PDF
-  const pdfBuffer = await convertSVGtoPDF(svgContent);
+  const { pdfBuffer } = await gerarPrescricaoPdf(
+    {
+      pacienteNome: params.pacienteNome,
+      data: params.data,
+      assinaturaTipo: params.assinaturaTipo,
+      itens: params.medicamentos.map((medicamento) => ({
+        nome: medicamento.nome,
+        dosagem: medicamento.dosagem,
+        frequencia: medicamento.posologia,
+        duracao: medicamento.duracao,
+        via: medicamento.via,
+      })),
+      observacoes: params.instrucoesAdicionais,
+    },
+    {
+      converter: convertSVGtoPDF,
+      filePrefix: "receituario",
+    }
+  );
 
   // Upload para S3
   const timestamp = Date.now();
