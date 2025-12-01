@@ -15,46 +15,53 @@ export class TimelineService {
   static async buscarHistoricoCompleto(pacienteId: number): Promise<EventoTimeline[]> {
     const eventos: EventoTimeline[] = [];
 
+    // 1. Consultas e marcos terapêuticos
     const consultas = await db.getConsultasByPaciente(pacienteId);
     consultas.forEach((consulta) => {
-      const conduta = consulta.conduta || "";
-      const temAlteracaoConduta = conduta.toLowerCase().includes("ajuste") || conduta.toLowerCase().includes("inicia");
+      const conduta = consulta.conduta?.toLowerCase() || "";
+      // Lógica avançada para detectar marcos clínicos importantes
+      const isMarco = /inicia|introduz|suspende|alta/.test(conduta);
+      const isAjuste = /aumenta|reduz|ajusta/.test(conduta);
 
       eventos.push({
         id: `cons-${consulta.id}`,
         data: consulta.dataHora,
-        tipo: "consulta",
-        titulo: "Consulta Médica",
-        subtitulo: (consulta.anamnese as any)?.queixaPrincipal || "Rotina",
+        tipo: isMarco ? "marco" : "consulta",
+        titulo: isMarco ? "Marco Clínico" : "Consulta Médica",
+        subtitulo: (consulta.anamnese as any)?.queixaPrincipal || "Acompanhamento",
         detalhes: {
-          hipoteses: consulta.hipotesesDiagnosticas,
-          conduta: consulta.conduta,
+          soap: {
+            s: (consulta.anamnese as any)?.queixaPrincipal,
+            o: (consulta.exameFisico as any)?.exameGeral,
+            a: consulta.hipotesesDiagnosticas,
+            p: consulta.conduta,
+          },
         },
         tags: consulta.status ? [consulta.status] : [],
-        importancia: temAlteracaoConduta ? "alta" : "normal",
+        importancia: isMarco || isAjuste ? "alta" : "normal",
       });
     });
 
+    // 2. Exames
     const exames = await db.getExamesByPaciente(pacienteId);
     exames.forEach((exame) => {
       const resultados = Array.isArray(exame.resultados) ? exame.resultados : [];
-      const temCritico = resultados.some((resultado: any) => resultado.status === "critico");
+      // Conta quantos resultados foram marcados como críticos pela IA ou manualmente
+      const criticos = resultados.filter((resultado: any) => resultado.status === "critico").length;
 
       eventos.push({
         id: `exam-${exame.id}`,
         data: exame.dataExame,
         tipo: "exame",
-        titulo: exame.tipo || "Exame Laboratorial",
-        subtitulo: exame.laboratorio,
-        detalhes: {
-          resultadosCount: resultados.length,
-          observacoes: exame.observacoes,
-        },
-        tags: temCritico ? ["crítico"] : [],
-        importancia: temCritico ? "alta" : "normal",
+        titulo: exame.tipo || "Exames Laboratoriais",
+        subtitulo: `${resultados.length} parâmetros`,
+        detalhes: { resultados },
+        tags: criticos > 0 ? [`${criticos} críticos`] : [],
+        importancia: criticos > 0 ? "alta" : "normal",
       });
     });
 
+    // 3. Bioimpedância
     const bios = await db.getBioimpedanciasByPaciente(pacienteId);
     bios.forEach((bio) => {
       const res = bio.resultados as any;
@@ -68,6 +75,7 @@ export class TimelineService {
       });
     });
 
+    // Ordenação cronológica decrescente (mais recente primeiro)
     return eventos.sort((a, b) => b.data.getTime() - a.data.getTime());
   }
 }
