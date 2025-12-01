@@ -1,4 +1,4 @@
-import { invokeLLM } from "../../_core/llm";
+import { invokeLLM } from "./_core/llm";
 
 export type TipoAba = "hma" | "exame_fisico" | "resumo" | "hipoteses" | "plano";
 

@@ -38,6 +38,9 @@ import { ExameResultadosTable } from "./ExameResultadosTable";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import EvolutionChart from "./EvolutionChart";
+import { ListaAudiosPaciente } from "./components/ListaAudiosPaciente";
+import { AbaPlanosTerapeuticos } from "./components/AbaPlanosTerapeuticos";
+import { TimelineEvolucao } from "./components/TimelineEvolucao";
 import { gerarParametroId, montarSeriesEvolucao } from "./examesUtils";
 import { gerarDashboardMetabolico, gerarPlanoDual, PlanoTemplate, PlanoVersao } from "./shared/pendenciasEmFoco";
 
@@ -100,7 +103,6 @@ export default function PacienteDetalhes() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConsultaDialogOpen, setIsConsultaDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [duracoesAudio, setDuracoesAudio] = useState<Record<number, number>>({});
   const [isExameDialogOpen, setIsExameDialogOpen] = useState(false);
   const [exameEmEdicaoId, setExameEmEdicaoId] = useState<number | null>(null);
   const [mostrarTabelaEditavel, setMostrarTabelaEditavel] = useState(false);
@@ -606,15 +608,6 @@ export default function PacienteDetalhes() {
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
-  const formatarDuracao = (duracaoSegundos?: number) => {
-    if (!duracaoSegundos || Number.isNaN(duracaoSegundos)) return "--:--";
-    const minutos = Math.floor(duracaoSegundos / 60);
-    const segundos = Math.floor(duracaoSegundos % 60)
-      .toString()
-      .padStart(2, "0");
-    return `${minutos}:${segundos}`;
-  };
-
   const [consultaFormData, setConsultaFormData] = useState({
     dataHora: getDataHoraAtual(),
     observacoes: "",
@@ -761,62 +754,14 @@ export default function PacienteDetalhes() {
                       );
                     }
 
-                    return (
-                      <div className="space-y-4">
-                        {consultasComAudio.map((consulta) => (
-                          <Card key={consulta.id} className="border border-gray-200">
-                            <CardHeader className="pb-2">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <CardTitle className="text-base">
-                                    Consulta em {new Date(consulta.dataHora).toLocaleDateString("pt-BR")}
-                                  </CardTitle>
-                                  <CardDescription>
-                                    {new Date(consulta.dataHora).toLocaleTimeString("pt-BR", {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                    {consulta.status ? ` • ${consulta.status}` : ""}
-                                    {duracoesAudio[consulta.id] &&
-                                      ` • Duração: ${formatarDuracao(duracoesAudio[consulta.id])}`}
-                                  </CardDescription>
-                                </div>
-                                <Badge variant="outline">Áudio</Badge>
-                              </div>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                              <audio
-                                controls
-                                className="w-full"
-                                src={consulta.audioUrl || undefined}
-                                onLoadedMetadata={(event) => {
-                                  if (!Number.isFinite(event.currentTarget.duration)) return;
-                                  setDuracoesAudio((prev) => ({
-                                    ...prev,
-                                    [consulta.id]: event.currentTarget.duration,
-                                  }));
-                                }}
-                              />
-                              <div className="flex items-center justify-between text-xs text-gray-600">
-                                <span className="flex items-center gap-2">
-                                  <Volume2 className="h-4 w-4" />
-                                  Arquivo salvo no prontuário
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="flex items-center gap-2"
-                                  onClick={() => consulta.audioUrl && window.open(consulta.audioUrl, "_blank")}
-                                >
-                                  <Download className="h-4 w-4" />
-                                  Baixar
-                                </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    );
+                    const audios = consultasComAudio.map((consulta) => ({
+                      id: consulta.id,
+                      data: consulta.dataHora,
+                      url: consulta.audioUrl as string,
+                      contexto: consulta.status,
+                    }));
+
+                    return <ListaAudiosPaciente audios={audios} />;
                   })()
                 )}
               </CardContent>
@@ -1153,6 +1098,8 @@ export default function PacienteDetalhes() {
           {/* Aba Planos Terapêuticos */}
           <TabsContent value="planos">
             <div className="space-y-6">
+              <AbaPlanosTerapeuticos consultaId={consultas?.[0]?.id} />
+
               <Card>
                 <CardHeader>
                   <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -1343,7 +1290,9 @@ export default function PacienteDetalhes() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-6">
+                  <TimelineEvolucao pacienteId={pacienteId} />
+
                   {timelineFiltrada.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">Sem eventos para exibir</div>
                   ) : (
