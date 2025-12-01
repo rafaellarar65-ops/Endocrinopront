@@ -71,6 +71,59 @@ function normalizeResultados(resultados?: Array<any>) {
   });
 }
 
+const PARAMETRO_ID_MAP: Record<string, number> = {
+  hemoglobina: 1,
+  rdw: 2,
+  leucocitos: 3,
+  leucocito: 3,
+  plaquetas: 4,
+  hematocrito: 5,
+  glicemia: 6,
+  hba1c: 7,
+  tsh: 8,
+  t4livre: 9,
+  creatinina: 10,
+  ureia: 11,
+};
+
+function normalizarSlug(valor: string) {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gi, "");
+}
+
+function gerarIdParametro(parametro: string, fallbackOffset: number = 1000) {
+  const slug = normalizarSlug(parametro);
+  const mapped = PARAMETRO_ID_MAP[slug as keyof typeof PARAMETRO_ID_MAP];
+  if (mapped) return mapped;
+
+  let hash = 0;
+  for (let i = 0; i < slug.length; i++) {
+    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0;
+  }
+  return fallbackOffset + (hash % 9000);
+}
+
+function normalizeResultados(resultados?: Array<any>) {
+  if (!resultados || resultados.length === 0) return [];
+
+  return resultados.map((resultado, index) => {
+    const parametro = resultado.parametro || resultado.nome || "";
+    const id = resultado.id ?? gerarIdParametro(parametro, 1000 + index);
+
+    return {
+      id,
+      parametro,
+      valor: resultado.valor ?? "",
+      unidade: resultado.unidade ?? "",
+      referencia: resultado.referencia ?? resultado.valorReferencia ?? "",
+      status: resultado.status ?? "normal",
+    };
+  });
+}
+
 // MÓDULO 10: BUSCA GLOBAL
 const buscaGlobalProcedure = protectedProcedure
   .input(
