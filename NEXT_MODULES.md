@@ -12,22 +12,35 @@ Este arquivo detalha módulos prioritários para evolução do sistema.
 - Armazenar histórico e gerar gráficos de risco.
 - Exportar resultados para PDF e anexar à consulta.
 
-## 3. Planos terapêuticos
-- Versão médico e versão paciente (Markdown/HTML).
-- Envio por WhatsApp/Email com registro de leitura.
-- Bibliotecas de templates reutilizáveis.
+## 3. Planos Terapêuticos (prioridade média)
+- Versões separadas:
+  - **Médico (detalhada)** com racional clínico, riscos e referências.
+  - **Paciente (linguagem simples)** com orientações práticas e metas.
+- Editor rico (HTML/Markdown) com blocos reutilizáveis e revisão antes de salvar.
+- Templates por condição clínica (DM2, obesidade, dislipidemia, tireoide) com variáveis substituíveis.
+- Envio por WhatsApp/Email com registro de leitura e histórico de versões.
+- Log de leitura pelo paciente e reenvio rápido.
 
-## 4. Timeline de evolução
-- Linha do tempo consolidando consultas, exames e bioimpedância.
-- Gráficos resumidos de parâmetros críticos.
-- Filtros por período e tipo de evento.
+## 4. Timeline de evolução (Módulo 19)
+- Linha do tempo consolidada (consultas, exames, bioimpedância e marcos clínicos).
+- Notas SOAP estruturadas e exibidas por evento.
+- Marcos automáticos: início/ajuste de medicação, eventos adversos, retornos antecipados.
+- Gráficos resumidos de parâmetros críticos com filtros por período e tipo de evento.
+- Comparação entre consultas e análise longitudinal com diferenças entre pontos consecutivos.
 
-## 5. Documentos automáticos
+## 5. Dashboard Metabólico Completo
+- Consolidação avançada (BIA + Exames + Escores) em painéis únicos.
+- Velocímetros de risco e mini-infográficos com thresholds configuráveis.
+- Alertas automáticos de valores críticos (ex.: HbA1c, TSH, lipídios, PA).
+- Tendências e previsões simples (ex.: regressão linear de 3–5 pontos) por parâmetro.
+- Comparação com população de referência e faixas alvo por diagnóstico.
+
+## 6. Documentos automáticos
 - Atestados, declarações e relatórios padronizados.
-- Assinatura digital (quando disponível).
-- Histórico de documentos no perfil do paciente.
+- Assinatura digital (quando disponível) ou manual, escolhida na geração.
+- Histórico de documentos no perfil do paciente, com versões e status.
 
-## 6. Monitoramento contínuo
+## 7. Monitoramento contínuo
 - Importar leituras de glicemia capilar (foto ou manual).
 - Alertas de valores críticos e recomendações rápidas.
 - Integração futura com wearables (quando API disponível).
