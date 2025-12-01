@@ -3,7 +3,8 @@
  */
 
 import { fillReceituarioSVG, fillBioimpedanciaSVG, convertSVGtoPDF, type ReceituarioData, type BioimpedanciaData } from "./svgProcessor";
-import { storagePut } from "../storage";
+import { uploadPdfBuffer } from "./storage";
+export { generateLaudoPDF } from "./lib/laudoPdfService";
 
 export interface GenerateReceituarioParams {
   pacienteNome: string;
@@ -75,12 +76,9 @@ export async function generateReceituarioPDF(
   const fileName = `receituario-${pacienteId}-${timestamp}.pdf`;
   const fileKey = `documentos/${pacienteId}/${fileName}`;
 
-  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+  const { pdfUrl, pdfPath } = await uploadPdfBuffer(fileKey, pdfBuffer);
 
-  return {
-    pdfUrl,
-    pdfPath: fileKey,
-  };
+  return { pdfUrl, pdfPath };
 }
 
 /**
@@ -129,10 +127,7 @@ export async function generateBioimpedanciaPDF(
   const fileName = `bioimpedancia-${pacienteId}-${timestamp}.pdf`;
   const fileKey = `documentos/${pacienteId}/${fileName}`;
 
-  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+  const { pdfUrl, pdfPath } = await uploadPdfBuffer(fileKey, pdfBuffer);
 
-  return {
-    pdfUrl,
-    pdfPath: fileKey,
-  };
+  return { pdfUrl, pdfPath };
 }
