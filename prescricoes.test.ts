@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sugerirPrescricaoIA } from "./services/sugerirPrescricao";
 import { verificarInteracoesIA } from "./services/verificarInteracoes";
+import { gerarPrescricaoPdf } from "./lib/prescricaoPdfService";
 
 describe("Módulo 18: Prescrições Médicas Inteligentes", () => {
   describe("sugerirPrescricaoIA", () => {
@@ -124,5 +125,71 @@ describe("Módulo 18: Prescrições Médicas Inteligentes", () => {
         expect(["leve", "moderada", "grave"]).toContain(interacao.gravidade);
       });
     }, 30000);
+  });
+
+  describe("Geração de PDF de prescrição", () => {
+    it("formata itens e observações no HTML base", async () => {
+      let htmlCapturado = "";
+      await gerarPrescricaoPdf(
+        {
+          pacienteNome: "Maria Silva",
+          data: "2024-05-01",
+          assinaturaTipo: "digital",
+          observacoes: "Revisar em 15 dias",
+          itens: [
+            {
+              nome: "Metformina",
+              dosagem: "500mg",
+              frequencia: "2x/dia",
+              duracao: "30 dias",
+              orientacoes: "Ingerir junto às refeições",
+            },
+          ],
+        },
+        {
+          converter: async (html) => {
+            htmlCapturado = html;
+            return Buffer.from("pdf");
+          },
+          filePrefix: "teste",
+        }
+      );
+
+      expect(htmlCapturado).toContain("Metformina");
+      expect(htmlCapturado).toContain("500mg");
+      expect(htmlCapturado).toContain("2x/dia");
+      expect(htmlCapturado).toContain("30 dias");
+      expect(htmlCapturado).toContain("Revisar em 15 dias");
+    });
+
+    it("gera metadados e nome de arquivo sanitizado", async () => {
+      const resultado = await gerarPrescricaoPdf(
+        {
+          pacienteNome: "João da Silva",
+          data: "2024-05-10",
+          itens: [
+            {
+              nome: "Levotiroxina",
+              dosagem: "75mcg",
+              frequencia: "1x/dia",
+              duracao: "60 dias",
+            },
+            {
+              nome: "Vitamina D",
+              dosagem: "2000UI",
+              frequencia: "1x/dia",
+              duracao: "30 dias",
+            },
+          ],
+        },
+        {
+          converter: async (html) => Buffer.from(html),
+        }
+      );
+
+      expect(resultado.metadata.totalItens).toBe(2);
+      expect(resultado.metadata.paciente).toBe("João da Silva");
+      expect(resultado.fileName).toContain("prescricao-joao-da-silva-2024-05-10.pdf");
+    });
   });
 });
