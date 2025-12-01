@@ -2,13 +2,22 @@ import { laudoSchema, type Laudo } from "../laudoSchema";
 import { convertSVGtoPDF } from "../svgProcessor";
 import { storagePut } from "../storage";
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function renderLaudoHTML(laudo: Laudo): string {
   const achadosHtml = laudo.achados
     .map(
       (achado, index) => `
       <div class="achado">
-        <div class="achado-titulo">${index + 1}. ${achado.titulo}</div>
-        <div class="achado-descricao">${achado.descricao}</div>
+        <div class="achado-titulo">${index + 1}. ${escapeHtml(achado.titulo)}</div>
+        <div class="achado-descricao">${escapeHtml(achado.descricao)}</div>
       </div>
     `
     )
@@ -39,9 +48,9 @@ export function renderLaudoHTML(laudo: Laudo): string {
       <header>
         <h1>Laudo Clínico</h1>
         <div class="meta">
-          <div><strong>Paciente:</strong> ${laudo.paciente.nome}</div>
-          <div><strong>Documento:</strong> ${laudo.paciente.documento ?? "-"}</div>
-          <div><strong>Data:</strong> ${laudo.dataEmissao}</div>
+          <div><strong>Paciente:</strong> ${escapeHtml(laudo.paciente.nome)}</div>
+          <div><strong>Documento:</strong> ${escapeHtml(laudo.paciente.documento ?? "-")}</div>
+          <div><strong>Data:</strong> ${escapeHtml(laudo.dataEmissao)}</div>
         </div>
       </header>
 
@@ -52,18 +61,18 @@ export function renderLaudoHTML(laudo: Laudo): string {
 
       <section class="section">
         <div class="section-title">Conclusão</div>
-        <div class="conclusao">${laudo.conclusao}</div>
+        <div class="conclusao">${escapeHtml(laudo.conclusao)}</div>
       </section>
 
       ${laudo.observacoes ? `<section class="section">
         <div class="section-title">Observações</div>
-        <div class="observacoes">${laudo.observacoes}</div>
+        <div class="observacoes">${escapeHtml(laudo.observacoes)}</div>
       </section>` : ""}
 
       <section class="section carimbo">
-        <div><strong>Responsável:</strong> ${laudo.carimbo.profissional}</div>
-        <div><strong>Registro:</strong> ${laudo.carimbo.registro}</div>
-        <div class="assinatura">${laudo.carimbo.assinaturaDigital}</div>
+        <div><strong>Responsável:</strong> ${escapeHtml(laudo.carimbo.profissional)}</div>
+        <div><strong>Registro:</strong> ${escapeHtml(laudo.carimbo.registro)}</div>
+        <div class="assinatura">${escapeHtml(laudo.carimbo.assinaturaDigital)}</div>
       </section>
     </body>
   </html>
