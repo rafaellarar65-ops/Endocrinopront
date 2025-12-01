@@ -13,10 +13,14 @@ import mysql from "mysql2/promise";
 const connection = mysql.createPool(process.env.DATABASE_URL!);
 const drizzleDb = drizzle(connection);
 import { aiOrchestrator } from "./ai/orchestrator";
-import { storagePut } from "./storage";
+import { storagePut, uploadPdfBuffer } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { ESCORES_CATALOGO } from "./shared/escoresCatalogo";
 import { calcularEscoresPadrao, montarEscoreContexto } from "./shared/escoreCalcs";
+import { parseBioimpedanceXls } from "./src/modules/bioimpedance/parseBioimpedanceXls";
+import { buildContextV6 } from "./src/modules/bioimpedance/buildContextV6";
+import { renderBioimpedanceHtmlV6 } from "./src/modules/bioimpedance/renderHtmlV6";
+import { htmlToPdfBuffer } from "./src/modules/bioimpedance/generatePdfV6";
 
 const PARAMETRO_ID_MAP: Record<string, number> = {
   hemoglobina: 1,
@@ -597,6 +601,21 @@ ESCORES REALIZADOS: ${JSON.stringify(escores)}
       }))
       .mutation(async ({ input }) => {
         return await db.createBioimpedancia(input);
+      }),
+  }),
+
+  bioimpedanceV6: router({
+    generate: protectedProcedure
+      .input(z.object({ fileBase64: z.string(), patientName: z.string(), pacienteId: z.number() }))
+      .mutation(async ({ input }) => {
+        const buffer = Buffer.from(input.fileBase64, "base64");
+        const rows = parseBioimpedanceXls(buffer);
+        const ctx = await buildContextV6(rows, { patientName: input.patientName });
+        const html = renderBioimpedanceHtmlV6(ctx);
+        const pdfBuffer = await htmlToPdfBuffer(html);
+        const fileKey = `documentos/${input.pacienteId}/bio_v6_${Date.now()}.pdf`;
+        const { pdfUrl } = await uploadPdfBuffer(fileKey, pdfBuffer);
+        return { success: true, pdfUrl };
       }),
   }),
 
