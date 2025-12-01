@@ -3,10 +3,12 @@ import path from 'path';
 
 export default defineConfig({
   test: {
-    environment: 'node',
+    environment: 'jsdom',
+    globals: true,
   },
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './'),
       '@/_core': path.resolve(__dirname, '_core'),
       '@shared': path.resolve(__dirname, 'shared'),
     },
