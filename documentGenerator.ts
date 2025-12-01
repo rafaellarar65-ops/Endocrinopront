@@ -2,8 +2,14 @@
  * Serviço para gerar documentos médicos (receituários, bioimpedância, etc.)
  */
 
-import { fillReceituarioSVG, fillBioimpedanciaSVG, convertSVGtoPDF, type ReceituarioData, type BioimpedanciaData } from "./svgProcessor";
-import { storagePut } from "../storage";
+import {
+  fillReceituarioSVG,
+  fillBioimpedanciaSVG,
+  convertSVGtoPDF,
+  type ReceituarioData,
+  type BioimpedanciaData,
+} from "./svgProcessor";
+import { storagePut } from "./storage";
 
 export interface GenerateReceituarioParams {
   pacienteNome: string;
@@ -46,6 +52,23 @@ export interface GenerateBioimpedanciaParams {
     fatControl: number;
     muscleControl: number;
   };
+}
+
+/**
+ * Permite reusar a conversão de HTML/SVG para PDF em outros serviços
+ */
+export { convertSVGtoPDF };
+
+/**
+ * Faz upload de um buffer PDF para o storage padrão e retorna URL e path
+ */
+export async function uploadPdfBuffer(
+  fileKey: string,
+  pdfBuffer: Buffer
+): Promise<{ pdfUrl: string; pdfPath: string }> {
+  const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+
+  return { pdfUrl, pdfPath: fileKey };
 }
 
 /**
