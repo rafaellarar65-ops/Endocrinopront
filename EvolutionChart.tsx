@@ -31,6 +31,7 @@ interface EvolutionChartProps {
   color: string;
   unit: string;
   title: string;
+  warning?: string;
 }
 
 export default function EvolutionChart({
@@ -39,6 +40,7 @@ export default function EvolutionChart({
   color,
   unit,
   title,
+  warning,
 }: EvolutionChartProps) {
   // Filtrar dados nulos e ordenar por data
   const validData = data
@@ -140,7 +142,12 @@ export default function EvolutionChart({
   };
 
   return (
-    <div className="h-64">
+    <div className="h-64 space-y-2">
+      {warning && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+          {warning}
+        </p>
+      )}
       <Line data={chartData} options={options} />
     </div>
   );

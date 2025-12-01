@@ -91,8 +91,13 @@ export function UltimasConsultasColumn({
                   >
                     <CardContent className="p-3">
                       <div className="flex items-start justify-between mb-2">
-                        <div className="text-xs font-semibold text-gray-700">
-                          {new Date(cons.dataHora).toLocaleDateString("pt-BR")}
+                        <div>
+                          <div className="text-xs font-semibold text-gray-700">
+                            {new Date(cons.dataHora).toLocaleDateString("pt-BR")}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {cons.status === 'concluida' ? 'Finalizada' : 'Em aberto'}
+                          </div>
                         </div>
                         {isAtual && (
                           <Badge variant="default" className="text-[10px] px-2 py-0">
