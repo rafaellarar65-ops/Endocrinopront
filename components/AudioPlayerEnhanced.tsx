@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Download, FastForward, Pause, Play } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Play, Pause, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 
 interface AudioPlayerProps {
   src: string;
@@ -33,98 +35,57 @@ export function AudioPlayerEnhanced({ src, onDownload }: AudioPlayerProps) {
   }, []);
 
   const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (isPlaying) {
-      audio.pause();
-    } else {
-      audio.play();
+    if (audioRef.current) {
+      if (isPlaying) audioRef.current.pause();
+      else audioRef.current.play();
+      setIsPlaying(!isPlaying);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const changeSpeed = () => {
-    const nextSpeed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
-    const audio = audioRef.current;
-    if (audio) {
-      audio.playbackRate = nextSpeed;
-    }
-    setSpeed(nextSpeed);
+    const newSpeed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
+    if (audioRef.current) audioRef.current.playbackRate = newSpeed;
+    setSpeed(newSpeed);
   };
 
-  const handleSeek = (value: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = value;
-    setProgress(value);
+  const handleSeek = (val: number[]) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = val[0];
+      setProgress(val[0]);
+    }
   };
 
   const formatTime = (time: number) => {
-    if (!Number.isFinite(time)) return "00:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60)
-      .toString()
-      .padStart(2, "0");
-    return `${minutes}:${seconds}`;
+    if (isNaN(time)) return "00:00";
+    const min = Math.floor(time / 60);
+    const sec = Math.floor(time % 60);
+    return `${min}:${sec.toString().padStart(2, "0")}`;
   };
 
   return (
     <div className="bg-white border rounded-lg p-3 shadow-sm flex flex-col gap-3">
       <audio ref={audioRef} src={src} preload="metadata" />
-
       <div className="flex items-center justify-between gap-4">
-        <button
-          type="button"
-          onClick={togglePlay}
-          className="h-10 w-10 rounded-full border flex items-center justify-center bg-gray-50 hover:bg-gray-100"
-          aria-label={isPlaying ? "Pausar" : "Reproduzir"}
-        >
-          {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
-        </button>
+        <Button size="icon" variant="secondary" className="h-10 w-10 rounded-full" onClick={togglePlay}>
+          {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-1" />}
+        </Button>
 
         <div className="flex-1 space-y-1">
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={1}
-            value={progress}
-            onChange={(e) => handleSeek(Number(e.target.value))}
-            className="w-full"
-          />
+          <Slider value={[progress]} max={duration || 100} step={1} onValueChange={handleSeek} className="cursor-pointer" />
           <div className="flex justify-between text-[10px] text-gray-500 font-medium font-mono">
             <span>{formatTime(progress)}</span>
             <span>{formatTime(duration)}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={changeSpeed}
-            className="h-8 px-3 rounded-md border text-xs font-semibold bg-gray-50 hover:bg-gray-100"
-            aria-label="Alternar velocidade"
-          >
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={changeSpeed} className="h-8 px-2 text-xs font-bold w-12">
             {speed}x
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSeek(Math.min(progress + 15, duration))}
-            className="h-8 w-8 rounded-md border flex items-center justify-center bg-gray-50 hover:bg-gray-100"
-            aria-label="Avançar 15 segundos"
-          >
-            <FastForward className="h-4 w-4" />
-          </button>
+          </Button>
           {onDownload && (
-            <button
-              type="button"
-              onClick={onDownload}
-              className="h-8 w-8 rounded-md border flex items-center justify-center bg-gray-50 hover:bg-gray-100"
-              aria-label="Download do áudio"
-            >
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onDownload}>
               <Download className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>
