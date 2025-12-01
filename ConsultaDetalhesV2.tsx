@@ -41,7 +41,7 @@ import EvolutionChart from "./EvolutionChart";
 import { gerarParametroId, montarSeriesEvolucao } from "./examesUtils";
 
 export default function ConsultaDetalhesV2() {
-  const { loading: authLoading, isAuthenticated } = useAuth();
+  const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [, params] = useRoute("/consulta/:id");
   const consultaId = params?.id ? parseInt(params.id) : 0;
@@ -390,67 +390,6 @@ export default function ConsultaDetalhesV2() {
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      toast.success("Gravação iniciada");
-    } catch (error) {
-      toast.error("Erro ao acessar microfone: " + (error as Error).message);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      toast.success("Gravação finalizada");
-    }
-  };
-
-  const processAudio = async () => {
-    if (!audioBlob) {
-      toast.error("Nenhum áudio gravado");
-      return;
-    }
-
-    if (!consulta?.pacienteId) {
-      toast.error("Paciente não encontrado");
-      return;
-    }
-
-    setIsProcessing(true);
-    toast.info("Processando áudio com IA... Isso pode levar alguns segundos");
-
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = () => {
-        const base64Audio = reader.result?.toString().split(',')[1];
-        if (!base64Audio) {
-          toast.error("Erro ao converter áudio");
-          setIsProcessing(false);
-          return;
-        }
-
-        let idade: number | undefined;
-        if (paciente?.dataNascimento) {
-          const hoje = new Date();
-          const nascimento = new Date(paciente.dataNascimento);
-          idade = hoje.getFullYear() - nascimento.getFullYear();
-        }
-
-        processarAnamneseMutation.mutate({
-          audioBlob: base64Audio,
-          pacienteId: consulta.pacienteId,
-          patientContext: {
-            nome: paciente?.nome || "",
-            idade,
-            sexo: paciente?.sexo || undefined,
-          },
         });
       };
     } catch (error) {
@@ -945,61 +884,6 @@ export default function ConsultaDetalhesV2() {
 
                   <div className="grid gap-2">
                     <Label htmlFor="hda">História da Doença Atual (HDA)</Label>
-                    <Textarea
-                      id="hda"
-                      value={anamnese.hda}
-                      onChange={(e) => {
-                        setAnamnese({ ...anamnese, hda: e.target.value });
-                        setHasUnsavedChanges(true);
-                      }}
-                      placeholder="Descreva a evolução da doença atual..."
-                      rows={4}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="historicoPatologico">Histórico Patológico</Label>
-                    <Textarea
-                      id="historicoPatologico"
-                      value={anamnese.historicoPatologico}
-                      onChange={(e) => {
-                        setAnamnese({ ...anamnese, historicoPatologico: e.target.value });
-                        setHasUnsavedChanges(true);
-                      }}
-                      placeholder="Doenças prévias, cirurgias, internações..."
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="medicamentosEmUso">Medicamentos em Uso</Label>
-                    <Textarea
-                      id="medicamentosEmUso"
-                      value={anamnese.medicamentosEmUso}
-                      onChange={(e) => {
-                        setAnamnese({ ...anamnese, medicamentosEmUso: e.target.value });
-                        setHasUnsavedChanges(true);
-                      }}
-                      placeholder="Liste os medicamentos em uso regular..."
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="alergias">Alergias</Label>
-                    <Input
-                      id="alergias"
-                      value={anamnese.alergias}
-                      onChange={(e) => {
-                        setAnamnese({ ...anamnese, alergias: e.target.value });
-                        setHasUnsavedChanges(true);
-                      }}
-                      placeholder="Alergias medicamentosas ou alimentares..."
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="historicoFamiliar">Histórico Familiar</Label>
                     <Textarea
                       id="historicoFamiliar"
                       value={anamnese.historicoFamiliar}
@@ -1517,169 +1401,6 @@ export default function ConsultaDetalhesV2() {
                     <FileText className="h-8 w-8 text-green-600" />
                     <span className="font-semibold">Gerar Atestado</span>
                   </Button>
-
-                  {/* Botão Pedido de Exames (placeholder) */}
-                  <Button
-                    variant="outline"
-                    className="h-24 flex flex-col items-center justify-center gap-2"
-                    onClick={() => alert("Funcionalidade em desenvolvimento")}
-                  >
-                    <FileText className="h-8 w-8 text-purple-600" />
-                    <span className="font-semibold">Pedido de Exames</span>
-                  </Button>
-
-                  {/* Botão Relatório Médico (placeholder) */}
-                  <Button
-                    variant="outline"
-                    className="h-24 flex flex-col items-center justify-center gap-2"
-                    onClick={() => alert("Funcionalidade em desenvolvimento")}
-                  >
-                    <FileText className="h-8 w-8 text-orange-600" />
-                    <span className="font-semibold">Relatório Médico</span>
-                  </Button>
-
-                  {/* Botão Declaração de Comparecimento (placeholder) */}
-                  <Button
-                    variant="outline"
-                    className="h-24 flex flex-col items-center justify-center gap-2"
-                    onClick={() => alert("Funcionalidade em desenvolvimento")}
-                  >
-                    <FileText className="h-8 w-8 text-teal-600" />
-                    <span className="font-semibold">Declaração</span>
-                  </Button>
-
-                  {/* Botão Laudo Médico (placeholder) */}
-                  <Button
-                    variant="outline"
-                    className="h-24 flex flex-col items-center justify-center gap-2"
-                    onClick={() => alert("Funcionalidade em desenvolvimento")}
-                  >
-                    <FileText className="h-8 w-8 text-red-600" />
-                    <span className="font-semibold">Laudo Médico</span>
-                  </Button>
-                </div>
-
-                {/* Placeholder antigo - remover depois */}
-                <div className="hidden space-y-4">
-                  <h3 className="font-semibold text-lg">Receituário Médico (ANTIGO)</h3>
-                  
-                  {receituario.medicamentos.map((med, index) => (
-                    <div key={index} className="border rounded-lg p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-medium">Medicamento {index + 1}</h4>
-                        {receituario.medicamentos.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const novos = receituario.medicamentos.filter((_, i) => i !== index);
-                              setReceituario({ ...receituario, medicamentos: novos });
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      
-                      <div className="grid gap-3">
-                        <div className="grid gap-2">
-                          <Label htmlFor={`med-nome-${index}`}>Nome do Medicamento</Label>
-                          <Input
-                            id={`med-nome-${index}`}
-                            value={med.nome}
-                            onChange={(e) => {
-                              const novos = [...receituario.medicamentos];
-                              novos[index].nome = e.target.value;
-                              setReceituario({ ...receituario, medicamentos: novos });
-                            }}
-                            placeholder="Ex: Metformina 850mg"
-                          />
-                        </div>
-                        
-                        <div className="grid gap-2">
-                          <Label htmlFor={`med-posologia-${index}`}>Posologia</Label>
-                          <Input
-                            id={`med-posologia-${index}`}
-                            value={med.posologia}
-                            onChange={(e) => {
-                              const novos = [...receituario.medicamentos];
-                              novos[index].posologia = e.target.value;
-                              setReceituario({ ...receituario, medicamentos: novos });
-                            }}
-                            placeholder="Ex: 1 comprimido 2x ao dia"
-                          />
-                        </div>
-                        
-                        <div className="grid md:grid-cols-2 gap-3">
-                          <div className="grid gap-2">
-                            <Label htmlFor={`med-quantidade-${index}`}>Quantidade</Label>
-                            <Input
-                              id={`med-quantidade-${index}`}
-                              value={med.quantidade}
-                              onChange={(e) => {
-                                const novos = [...receituario.medicamentos];
-                                novos[index].quantidade = e.target.value;
-                                setReceituario({ ...receituario, medicamentos: novos });
-                              }}
-                              placeholder="Ex: 60 comprimidos"
-                            />
-                          </div>
-                          
-                          <div className="grid gap-2">
-                            <Label htmlFor={`med-observacoes-${index}`}>Observações</Label>
-                            <Input
-                              id={`med-observacoes-${index}`}
-                              value={med.observacoes}
-                              onChange={(e) => {
-                                const novos = [...receituario.medicamentos];
-                                novos[index].observacoes = e.target.value;
-                                setReceituario({ ...receituario, medicamentos: novos });
-                              }}
-                              placeholder="Ex: Tomar após as refeições"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setReceituario({
-                        ...receituario,
-                        medicamentos: [
-                          ...receituario.medicamentos,
-                          { nome: "", posologia: "", quantidade: "", observacoes: "" }
-                        ]
-                      });
-                    }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Adicionar Medicamento
-                  </Button>
-                  
-                  <div className="grid gap-2">
-                    <Label htmlFor="orientacoes">Orientações Gerais</Label>
-                    <Textarea
-                      id="orientacoes"
-                      value={receituario.orientacoes}
-                      onChange={(e) => setReceituario({ ...receituario, orientacoes: e.target.value })}
-                      placeholder="Orientações adicionais para o paciente..."
-                      rows={4}
-                    />
-                  </div>
-                </div>
-                
-                {pdfUrl && (
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle className="h-5 w-5 text-green-600" />
-                        <span className="text-green-700 font-medium">Receituário gerado com sucesso!</span>
-                      </div>
-                      <Button
-                        variant="outline"
                         size="sm"
                         onClick={() => window.open(pdfUrl, '_blank')}
                       >
@@ -1788,17 +1509,3 @@ export default function ConsultaDetalhesV2() {
 
       {/* COLUNA 3: Últimas Consultas (20%) */}
       <UltimasConsultasColumn
-        consultaIdAtual={consulta.id}
-        pacienteId={consulta.pacienteId}
-      />
-
-      {/* Modal de Nova Prescrição */}
-      <ModalNovaPrescricao
-        open={modalPrescricaoOpen}
-        onClose={() => setModalPrescricaoOpen(false)}
-        pacienteId={consulta.pacienteId}
-        diagnosticoInicial={diagnosticoInicial}
-      />
-    </div>
-  );
-}
