@@ -3,7 +3,8 @@
  */
 
 import { fillReceituarioSVG, fillBioimpedanciaSVG, convertSVGtoPDF, type ReceituarioData, type BioimpedanciaData } from "./svgProcessor";
-import { storagePut } from "../storage";
+import { storagePut } from "./storage";
+export { generateLaudoPDF } from "./lib/laudoPdfService";
 
 export interface GenerateReceituarioParams {
   pacienteNome: string;
