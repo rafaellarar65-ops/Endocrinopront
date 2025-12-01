@@ -8,6 +8,7 @@ import {
   examesLaboratoriais,
   bioimpedancias,
   escoresClinicos,
+  escoreModulos,
   planosTerapeuticos,
   templates,
   documentos,
@@ -25,6 +26,8 @@ import {
   type InsertBioimpedancia,
   type EscoreClinico,
   type InsertEscoreClinico,
+  type EscoreModulo,
+  type InsertEscoreModulo,
   type PlanoTerapeutico,
   type InsertPlanoTerapeutico,
   type Template,
@@ -354,6 +357,25 @@ export async function getEscoresByPaciente(pacienteId: number) {
   return await db.select().from(escoresClinicos)
     .where(eq(escoresClinicos.pacienteId, pacienteId))
     .orderBy(desc(escoresClinicos.dataCalculo));
+}
+
+// ========== CATÁLOGO DE ESCORES ==========
+
+export async function createEscoreModulo(data: InsertEscoreModulo): Promise<EscoreModulo> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(escoreModulos).values(data);
+  const insertedId = Number(result[0].insertId);
+  const inserted = await db.select().from(escoreModulos).where(eq(escoreModulos.id, insertedId)).limit(1);
+  return inserted[0]!;
+}
+
+export async function listEscoreModulos(): Promise<EscoreModulo[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(escoreModulos).orderBy(desc(escoreModulos.createdAt));
 }
 
 // ========== PLANOS TERAPÊUTICOS ==========

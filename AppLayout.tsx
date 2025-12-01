@@ -1,16 +1,17 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
-import { 
-  Calendar, 
-  Search, 
-  Users, 
-  Activity, 
+import {
+  Calendar,
+  Search,
+  Users,
+  Activity,
   BarChart3,
   LogOut,
   Settings,
   Layout,
   Save,
-  FileCheck
+  FileCheck,
+  PlusSquare
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useLocation } from "wouter";
@@ -28,6 +29,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { icon: Calendar, label: "Agenda", path: "/agenda" },
     { icon: Users, label: "Pacientes", path: "/pacientes" },
     { icon: BarChart3, label: "Bioimpedâncias", path: "/bioimpedancias" },
+    { icon: PlusSquare, label: "Escores / Adicionar módulo", path: "/escores" },
     { icon: Save, label: "Protocolos salvos", path: "/protocolos" },
     { icon: FileCheck, label: "Prescrições salvas", path: "/prescricoes" },
     { icon: Settings, label: "Configurações", path: "/configuracoes" },

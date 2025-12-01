@@ -15,7 +15,7 @@ import Templates from "./pages/Templates";
 import NovaConsultaPage from "./pages/NovaConsultaPage";
 import AgendaPage from "./pages/AgendaPage";
 import RelatoriosPage from "./pages/RelatoriosPage";
-import EscoresPage from "./pages/EscoresPage";
+import EscoresPage from "./EscoresPage";
 import BioimpedanciasPage from "./pages/BioimpedanciasPage";
 import BioimpedanciaDetalhes from "./pages/BioimpedanciaDetalhes";
 import ProtocolosPage from "./pages/ProtocolosPage";
