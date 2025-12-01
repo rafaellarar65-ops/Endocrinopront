@@ -44,14 +44,15 @@ export function parseValorNumerico(valor?: string | null): number | null {
 type UnidadeNormalizada = {
   chave: string;
   rotulo: string;
+  fatorMgDl?: number;
 };
 
 const UNIDADE_MAP: Record<string, UnidadeNormalizada> = {
-  "mg/dl": { chave: "mg/dl", rotulo: "mg/dL" },
-  "mg%": { chave: "mg/dl", rotulo: "mg/dL" },
-  "mmol/l": { chave: "mmol/l", rotulo: "mmol/L" },
+  "mg/dl": { chave: "mg/dl", rotulo: "mg/dL", fatorMgDl: 1 },
+  "mg%": { chave: "mg/dl", rotulo: "mg/dL", fatorMgDl: 1 },
+  "mmol/l": { chave: "mmol/l", rotulo: "mmol/L", fatorMgDl: 18 },
+  "g/l": { chave: "g/l", rotulo: "g/L", fatorMgDl: 100 },
   "%": { chave: "%", rotulo: "%" },
-  "g/dl": { chave: "g/dl", rotulo: "g/dL" },
 };
 
 function normalizarUnidade(unidade?: string | null): UnidadeNormalizada | null {
@@ -60,30 +61,34 @@ function normalizarUnidade(unidade?: string | null): UnidadeNormalizada | null {
   return UNIDADE_MAP[normalized] ?? { chave: normalized, rotulo: unidade };
 }
 
-const CONVERSOES_BASE: Record<string, (valor: number) => number> = {
-  // Conversões aproximadas para séries com misto de unidades
-  "mmol/l->mg/dl": (v) => v * 18,
-};
+function converterValorNormalizado(
+  valor: number,
+  unidadeOrigem?: UnidadeNormalizada | null,
+  unidadeDestino?: UnidadeNormalizada | null
+) {
+  if (!unidadeOrigem || !unidadeDestino) return { valorConvertido: valor, aviso: "Unidade desconhecida" };
+  if (unidadeOrigem.chave === unidadeDestino.chave) return { valorConvertido: valor };
 
-function converterParaBase(valor: number, unidadeAtual: UnidadeNormalizada, unidadeBase: UnidadeNormalizada): {
-  valorConvertido: number;
-  aviso?: string;
-} {
-  if (unidadeAtual.chave === unidadeBase.chave) return { valorConvertido: valor };
-
-  const chaveConversao = `${unidadeAtual.chave}->${unidadeBase.chave}`;
-  const conversor = CONVERSOES_BASE[chaveConversao];
-  if (!conversor) {
+  if (unidadeOrigem.chave === "mmol/l" && unidadeDestino.chave === "mg/dl") {
     return {
-      valorConvertido: valor,
-      aviso: `Valores possuem unidades diferentes (${unidadeAtual.rotulo} vs ${unidadeBase.rotulo}). Série exibida sem conversão precisa.`,
+      valorConvertido: Number((valor * 18).toFixed(1)),
+      aviso: "Convertido de mmol/L",
     };
   }
 
-  return {
-    valorConvertido: conversor(valor),
-    aviso: `Valores convertidos de ${unidadeAtual.rotulo} para ${unidadeBase.rotulo} (conversão aproximada).`,
-  };
+  if (unidadeOrigem.fatorMgDl && unidadeDestino.fatorMgDl) {
+    const val = (valor * unidadeOrigem.fatorMgDl) / unidadeDestino.fatorMgDl;
+    return {
+      valorConvertido: Number(val.toFixed(2)),
+      aviso: `Convertido de ${unidadeOrigem.rotulo}`,
+    };
+  }
+
+  return { valorConvertido: valor, aviso: `Unidade diferente: ${unidadeOrigem.rotulo}` };
+}
+
+export function converterParaBase(valor: number, unidadeOrigem: string, unidadeDestino: string) {
+  return converterValorNormalizado(valor, normalizarUnidade(unidadeOrigem), normalizarUnidade(unidadeDestino));
 }
 
 export type ResultadoExame = {
@@ -134,9 +139,7 @@ export function montarSeriesEvolucao(exames: ExameComResultados[]): SerieEvoluca
       };
 
       const unidadeBase = atual.unidadeBase ? normalizarUnidade(atual.unidadeBase) : unidadeNormalizada;
-      const conversao = unidadeBase && unidadeNormalizada
-        ? converterParaBase(valorNumerico, unidadeNormalizada, unidadeBase)
-        : { valorConvertido: valorNumerico };
+      const conversao = converterValorNormalizado(valorNumerico, unidadeNormalizada, unidadeBase);
 
       atual.pontos.push({
         data: data.toISOString(),

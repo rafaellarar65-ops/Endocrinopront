@@ -38,10 +38,11 @@ import { ExameResultadosTable } from "./ExameResultadosTable";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import EvolutionChart from "./EvolutionChart";
+import { ListaAudiosPaciente } from "./components/ListaAudiosPaciente";
+import { AbaPlanosTerapeuticos } from "./components/AbaPlanosTerapeuticos";
+import { TimelineEvolucao } from "./components/TimelineEvolucao";
 import { gerarParametroId, montarSeriesEvolucao } from "./examesUtils";
 import { gerarDashboardMetabolico, gerarPlanoDual, PlanoTemplate, PlanoVersao } from "./shared/pendenciasEmFoco";
-
-const DIA_EM_MS = 24 * 60 * 60 * 1000;
 
 const montarPlanoComoMarkdown = (versao: PlanoVersao) => {
   const secoes = versao.secoes
@@ -100,7 +101,6 @@ export default function PacienteDetalhes() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConsultaDialogOpen, setIsConsultaDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [duracoesAudio, setDuracoesAudio] = useState<Record<number, number>>({});
   const [isExameDialogOpen, setIsExameDialogOpen] = useState(false);
   const [exameEmEdicaoId, setExameEmEdicaoId] = useState<number | null>(null);
   const [mostrarTabelaEditavel, setMostrarTabelaEditavel] = useState(false);
@@ -169,98 +169,6 @@ export default function PacienteDetalhes() {
     },
   ]);
 
-  const [tiposTimeline, setTiposTimeline] = useState<Array<"consulta" | "exame" | "bioimpedancia">>([
-    "consulta",
-    "exame",
-    "bioimpedancia",
-  ]);
-  const [periodoTimeline, setPeriodoTimeline] = useState<number | null>(null);
-
-  const timelineEventos = useMemo(() => {
-    const eventos: Array<{
-      data: string;
-      tipo: "consulta" | "exame" | "bioimpedancia";
-      titulo: string;
-      descricao?: string;
-      badge?: string;
-    }> = [];
-
-    consultas?.forEach((consulta) => {
-      const dataReferencia = consulta.dataHora || consulta.createdAt || new Date();
-      const soapPartes = [
-        consulta.anamnese?.queixaPrincipal
-          ? `S: ${consulta.anamnese.queixaPrincipal}`
-          : undefined,
-        consulta.exameFisico?.exameGeral
-          ? `O: ${consulta.exameFisico.exameGeral}`
-          : undefined,
-        consulta.hipotesesDiagnosticas ? `A: ${consulta.hipotesesDiagnosticas}` : undefined,
-        consulta.conduta ? `P: ${consulta.conduta}` : undefined,
-      ].filter(Boolean);
-
-      eventos.push({
-        data: dataReferencia as unknown as string,
-        tipo: "consulta",
-        titulo: `Consulta ${new Date(dataReferencia).toLocaleDateString("pt-BR")}`,
-        descricao: soapPartes.join(" | ") || "Sem notas SOAP registradas.",
-        badge: consulta.status === "concluida" ? "Finalizada" : "Em aberto",
-      });
-
-      if (consulta.conduta) {
-        const texto = consulta.conduta.toLowerCase();
-        if (/inicia|introduz/.test(texto)) {
-          eventos.push({
-            data: dataReferencia as unknown as string,
-            tipo: "consulta",
-            titulo: "Marco: Início de medicação",
-            descricao: consulta.conduta,
-            badge: "Marco",
-          });
-        }
-        if (/aumenta|reduz|ajusta/.test(texto)) {
-          eventos.push({
-            data: dataReferencia as unknown as string,
-            tipo: "consulta",
-            titulo: "Marco: Ajuste de dose",
-            descricao: consulta.conduta,
-            badge: "Dose",
-          });
-        }
-        if (/evento adverso|efeito colateral|reacao/.test(texto)) {
-          eventos.push({
-            data: dataReferencia as unknown as string,
-            tipo: "consulta",
-            titulo: "Evento adverso",
-            descricao: consulta.conduta,
-            badge: "Alerta",
-          });
-        }
-      }
-    });
-
-    exames?.forEach((exame) => {
-      eventos.push({
-        data: exame.dataExame as unknown as string,
-        tipo: "exame",
-        titulo: `Exame ${exame.tipo || "Laboratorial"}`,
-        descricao: `${exame.resultados?.length || 0} resultados registrados`,
-        badge: "Exame",
-      });
-    });
-
-    bioimpedancias?.forEach((bio) => {
-      eventos.push({
-        data: bio.dataAvaliacao as unknown as string,
-        tipo: "bioimpedancia",
-        titulo: "Bioimpedância",
-        descricao: bio.observacoes || "Avaliação corporal registrada",
-        badge: "Composição",
-      });
-    });
-
-    return eventos.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
-  }, [bioimpedancias, consultas, exames]);
-
   const templateAtivo = useMemo(
     () => planoTemplates.find((tpl) => tpl.condicao === templateSelecionado) ?? planoTemplates[0],
     [planoTemplates, templateSelecionado]
@@ -308,20 +216,6 @@ export default function PacienteDetalhes() {
 
     return gerarDashboardMetabolico(examesNormalizados, bioDados);
   }, [exames, indicadores]);
-
-  const timelineFiltrada = useMemo(() => {
-    return timelineEventos
-      .filter((evento) => tiposTimeline.includes(evento.tipo))
-      .filter((evento) =>
-        periodoTimeline ? new Date(evento.data).getTime() >= Date.now() - periodoTimeline * DIA_EM_MS : true
-      );
-  }, [periodoTimeline, timelineEventos, tiposTimeline]);
-
-  const toggleTipoTimeline = (tipo: "consulta" | "exame" | "bioimpedancia") => {
-    setTiposTimeline((prev) =>
-      prev.includes(tipo) ? prev.filter((item) => item !== tipo) : [...prev, tipo]
-    );
-  };
 
   const handleAbrirNovoExame = () => {
     setExameEmEdicaoId(null);
@@ -606,15 +500,6 @@ export default function PacienteDetalhes() {
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
-  const formatarDuracao = (duracaoSegundos?: number) => {
-    if (!duracaoSegundos || Number.isNaN(duracaoSegundos)) return "--:--";
-    const minutos = Math.floor(duracaoSegundos / 60);
-    const segundos = Math.floor(duracaoSegundos % 60)
-      .toString()
-      .padStart(2, "0");
-    return `${minutos}:${segundos}`;
-  };
-
   const [consultaFormData, setConsultaFormData] = useState({
     dataHora: getDataHoraAtual(),
     observacoes: "",
@@ -761,62 +646,14 @@ export default function PacienteDetalhes() {
                       );
                     }
 
-                    return (
-                      <div className="space-y-4">
-                        {consultasComAudio.map((consulta) => (
-                          <Card key={consulta.id} className="border border-gray-200">
-                            <CardHeader className="pb-2">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <CardTitle className="text-base">
-                                    Consulta em {new Date(consulta.dataHora).toLocaleDateString("pt-BR")}
-                                  </CardTitle>
-                                  <CardDescription>
-                                    {new Date(consulta.dataHora).toLocaleTimeString("pt-BR", {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                    {consulta.status ? ` • ${consulta.status}` : ""}
-                                    {duracoesAudio[consulta.id] &&
-                                      ` • Duração: ${formatarDuracao(duracoesAudio[consulta.id])}`}
-                                  </CardDescription>
-                                </div>
-                                <Badge variant="outline">Áudio</Badge>
-                              </div>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                              <audio
-                                controls
-                                className="w-full"
-                                src={consulta.audioUrl || undefined}
-                                onLoadedMetadata={(event) => {
-                                  if (!Number.isFinite(event.currentTarget.duration)) return;
-                                  setDuracoesAudio((prev) => ({
-                                    ...prev,
-                                    [consulta.id]: event.currentTarget.duration,
-                                  }));
-                                }}
-                              />
-                              <div className="flex items-center justify-between text-xs text-gray-600">
-                                <span className="flex items-center gap-2">
-                                  <Volume2 className="h-4 w-4" />
-                                  Arquivo salvo no prontuário
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="flex items-center gap-2"
-                                  onClick={() => consulta.audioUrl && window.open(consulta.audioUrl, "_blank")}
-                                >
-                                  <Download className="h-4 w-4" />
-                                  Baixar
-                                </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    );
+                    const audios = consultasComAudio.map((consulta) => ({
+                      id: consulta.id,
+                      data: consulta.dataHora,
+                      url: consulta.audioUrl as string,
+                      contexto: consulta.status,
+                    }));
+
+                    return <ListaAudiosPaciente audios={audios} />;
                   })()
                 )}
               </CardContent>
@@ -1153,6 +990,8 @@ export default function PacienteDetalhes() {
           {/* Aba Planos Terapêuticos */}
           <TabsContent value="planos">
             <div className="space-y-6">
+              <AbaPlanosTerapeuticos consultaId={consultas?.[0]?.id} />
+
               <Card>
                 <CardHeader>
                   <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -1307,63 +1146,11 @@ export default function PacienteDetalhes() {
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Timeline de evolução</CardTitle>
-                      <CardDescription>Consultas, exames, bioimpedância e marcos clínicos</CardDescription>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 justify-end">
-                      <div className="flex gap-2">
-                        {["consulta", "exame", "bioimpedancia"].map((tipo) => (
-                          <Button
-                            key={tipo}
-                            size="sm"
-                            variant={tiposTimeline.includes(tipo as any) ? "secondary" : "outline"}
-                            onClick={() => toggleTipoTimeline(tipo as any)}
-                          >
-                            {tipo}
-                          </Button>
-                        ))}
-                      </div>
-                      <Select
-                        value={periodoTimeline ? String(periodoTimeline) : ""}
-                        onValueChange={(value) => setPeriodoTimeline(value ? Number(value) : null)}
-                      >
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="Período" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">Todos</SelectItem>
-                          <SelectItem value="30">30 dias</SelectItem>
-                          <SelectItem value="90">90 dias</SelectItem>
-                          <SelectItem value="365">12 meses</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Badge variant="outline">Aderência {aderencia.percentual}%</Badge>
-                    </div>
-                  </div>
+                  <CardTitle>Timeline de evolução</CardTitle>
+                  <CardDescription>Consultas, exames, bioimpedância e marcos clínicos</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  {timelineFiltrada.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">Sem eventos para exibir</div>
-                  ) : (
-                    <div className="space-y-4">
-                      {timelineFiltrada.map((evento, index) => (
-                        <div key={`${evento.tipo}-${index}`} className="flex gap-3 items-start">
-                          <div className="w-20 text-xs text-gray-500 pt-1">
-                            {new Date(evento.data).toLocaleDateString("pt-BR")}
-                          </div>
-                          <div className="flex-1 border-l pl-4 pb-4">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary">{evento.titulo}</Badge>
-                              {evento.badge && <Badge variant="outline">{evento.badge}</Badge>}
-                            </div>
-                            <p className="text-sm text-gray-700 mt-1">{evento.descricao}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                <CardContent className="space-y-6">
+                  <TimelineEvolucao pacienteId={pacienteId} />
                 </CardContent>
               </Card>
 
