@@ -111,6 +111,13 @@ export function AbaPerfilMetabolico({
       { keepPreviousData: true }
     );
 
+  const calcularEscores = trpc.escores.calcularAutomatizados.useMutation?.({
+    onSuccess: () => {
+      refetchEscores();
+    },
+  });
+  const [statusAutomacao, setStatusAutomacao] = useState<string | null>(null);
+
   const dataLabel = perfil?.dataExame
     ? new Date(perfil.dataExame).toLocaleDateString("pt-BR")
     : null;
@@ -204,8 +211,35 @@ export function AbaPerfilMetabolico({
                 <Sparkles className="h-4 w-4" /> Atualizar com IA
               </>
             )}
-          </Button>
+            </Button>
         )}
+      </div>
+
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-blue-900">Calcular escores automaticamente</p>
+          <p className="text-xs text-blue-800">
+            FINDRISC, Framingham, HOMA-IR, TyG e TFG serão calculados a partir dos dados mais recentes da consulta e exames.
+          </p>
+          {statusAutomacao && (
+            <p className="text-[11px] text-blue-700 mt-1">{statusAutomacao}</p>
+          )}
+        </div>
+        <Button
+          onClick={async () => {
+            setStatusAutomacao("Executando automação de escores...");
+            try {
+              await calcularEscores?.mutateAsync?.({ pacienteId, consultaId });
+              setStatusAutomacao("Escores atualizados e salvos no histórico.");
+            } catch (error) {
+              setStatusAutomacao("Não foi possível calcular agora. Tente novamente.");
+            }
+          }}
+          disabled={!!calcularEscores?.isLoading || !pacienteId}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          {calcularEscores?.isLoading ? "Calculando..." : "Calcular escores padrão"}
+        </Button>
       </div>
 
       {/* BLOCO 1 – EXAMES BÁSICOS */}

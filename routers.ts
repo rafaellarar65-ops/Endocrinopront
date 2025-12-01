@@ -16,6 +16,7 @@ import { aiOrchestrator } from "./ai/orchestrator";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { ESCORES_CATALOGO } from "./shared/escoresCatalogo";
+import { calcularEscoresPadrao, montarEscoreContexto } from "./shared/escoreCalcs";
 
 const PARAMETRO_ID_MAP: Record<string, number> = {
   hemoglobina: 1,
@@ -1258,9 +1259,20 @@ REGRAS ADICIONAIS:
           limit: z.number().default(15),
         })
       )
-      .query(({ input }) => {
+      .query(async ({ input }) => {
         const termo = input.termo?.trim().toLowerCase();
-        const base = ESCORES_CATALOGO;
+        const custom = await db.listEscoreModulos();
+        const base = [
+          ...ESCORES_CATALOGO,
+          ...custom.map((m) => ({
+            id: `custom-${m.id}`,
+            nome: m.nome,
+            categoria: m.categoria ?? "custom",
+            descricao: m.descricao ?? "Escore criado via IA", 
+            variaveisPrincipais: (m.parametrosNecessarios as string[]) ?? [],
+            referencia: m.referencia ?? undefined,
+          })),
+        ];
 
         if (!termo) {
           return base.slice(0, input.limit);
@@ -1272,6 +1284,166 @@ REGRAS ADICIONAIS:
             return alvo.includes(termo);
           })
           .slice(0, input.limit);
+      }),
+
+    listarModulos: protectedProcedure.query(async () => {
+      const custom = await db.listEscoreModulos();
+      return {
+        base: ESCORES_CATALOGO,
+        custom: custom.map((m) => ({
+          id: m.id,
+          nome: m.nome,
+          descricao: m.descricao,
+          parametrosNecessarios: m.parametrosNecessarios,
+          referencia: m.referencia,
+          categoria: m.categoria ?? "custom",
+          criadoViaIA: m.criadoViaIA,
+          faixasInterpretacao: m.faixasInterpretacao,
+        })),
+      };
+    }),
+
+    solicitarModuloIA: protectedProcedure
+      .input(
+        z.object({
+          nome: z.string(),
+          descricao: z.string().optional(),
+          parametrosNecessarios: z.array(z.string()).optional(),
+          categoria: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const prompt = `Você é a IA mestre responsável por criar um novo escore clínico. Nome: ${input.nome}. Descrição: ${
+          input.descricao ?? "sem descrição"
+        }. Liste parâmetros, referências bibliográficas, faixas de corte e interpretações resumidas em JSON.`;
+
+        let parsed: any = null;
+        try {
+          const llmResponse = await invokeLLM({ messages: [{ role: "user", content: prompt }] });
+          parsed = JSON.parse(llmResponse.content);
+        } catch (error) {
+          parsed = {
+            parametros: input.parametrosNecessarios ?? [],
+            referencia: "Referência sugerida pela IA mestre (stub)",
+            faixas: [],
+            interpretacao: "Escore incorporado via requisição de módulo.",
+          };
+        }
+
+        const modulo = await db.createEscoreModulo({
+          nome: input.nome,
+          descricao: input.descricao ?? parsed?.descricao ?? "Módulo criado via IA mestre",
+          categoria: input.categoria ?? parsed?.categoria ?? "custom",
+          parametrosNecessarios: parsed?.parametros ?? input.parametrosNecessarios ?? [],
+          referencia: parsed?.referencia ?? "Referência em revisão",
+          faixasInterpretacao: parsed?.faixas ?? [],
+          criadoViaIA: true,
+        });
+
+        return modulo;
+      }),
+
+    calcularAutomatizados: protectedProcedure
+      .input(
+        z.object({
+          pacienteId: z.number(),
+          consultaId: z.number().optional(),
+          tipos: z
+            .array(
+              z.enum([
+                "findrisc",
+                "framingham",
+                "homa-ir",
+                "tyg-index",
+                "tfg",
+              ])
+            )
+            .optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const consulta = input.consultaId ? await db.getConsultaById(input.consultaId) : null;
+        const pacienteId = input.pacienteId || consulta?.pacienteId;
+        if (!pacienteId) {
+          throw new Error("Paciente não encontrado para cálculo de escores");
+        }
+
+        const paciente = await db.getPacienteById(pacienteId);
+        const exames = await db.getExamesByPaciente(pacienteId);
+        const ultimoExame = exames[0];
+        const bioimpedancias = await db.getBioimpedanciasByPaciente(pacienteId);
+        const bio = bioimpedancias[0];
+
+        let dadosLab: any = null;
+        if (ultimoExame?.resultados) {
+          try {
+            dadosLab = typeof ultimoExame.resultados === "string"
+              ? JSON.parse(ultimoExame.resultados as string)
+              : ultimoExame.resultados;
+          } catch {
+            dadosLab = null;
+          }
+        }
+
+        const parseNumber = (v: any): number | null => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        };
+
+        const parsePressao = (valor?: string | null) => {
+          if (!valor) return null;
+          const match = valor.match(/(\d{2,3})\/(\d{2,3})/);
+          if (!match) return null;
+          return parseNumber(match[1]);
+        };
+
+        const idade = paciente?.dataNascimento
+          ? Math.floor((Date.now() - new Date(paciente.dataNascimento).getTime()) / (365.25 * 24 * 3600 * 1000))
+          : undefined;
+
+        const ctx = montarEscoreContexto({
+          idade,
+          sexo: paciente?.sexo ?? "",
+          peso: (consulta?.exameFisico as any)?.peso ?? (bio?.resultados as any)?.peso ?? null,
+          altura: (consulta?.exameFisico as any)?.altura ?? (bio?.resultados as any)?.altura ?? null,
+          circunferencia:
+            (consulta?.exameFisico as any)?.circunferenciaAbdominal ?? (bio?.resultados as any)?.circunferenciaAbdominal ?? null,
+          pressaoSistolica: parsePressao((consulta?.exameFisico as any)?.pressaoArterial),
+          glicemia: dadosLab ? parseNumber(dadosLab.glicemia) : null,
+          hba1c: dadosLab ? parseNumber(dadosLab.hba1c) : null,
+          colesterolTotal: dadosLab ? parseNumber(dadosLab.colesterolTotal) : null,
+          ldl: dadosLab ? parseNumber(dadosLab.ldl) : null,
+          hdl: dadosLab ? parseNumber(dadosLab.hdl) : null,
+          triglicerideos: dadosLab ? parseNumber(dadosLab.triglicerideos) : null,
+          insulina: dadosLab ? parseNumber(dadosLab.insulina) : null,
+          creatinina: dadosLab ? parseNumber(dadosLab.creatinina ?? dadosLab.creatininaSerica) : null,
+          tabagismo: (consulta?.anamnese as any)?.habitosDeVida?.toLowerCase?.().includes("fuma"),
+          diabetes: (consulta?.hipotesesDiagnosticas ?? "").toLowerCase().includes("diabet"),
+        });
+
+        const calculados = calcularEscoresPadrao(ctx).filter((item) => {
+          if (!input.tipos) return true;
+          return input.tipos.includes(item.tipoEscore as any);
+        });
+
+        const salvos = [] as any[];
+        for (const esc of calculados) {
+          const registro = await db.createEscoreClinico({
+            pacienteId,
+            consultaId: input.consultaId ?? consulta?.id,
+            tipoEscore: esc.tipoEscore,
+            dataCalculo: new Date(),
+            parametros: esc.parametrosUsados,
+            resultado: esc.resultado,
+            interpretacao: esc.interpretacao,
+          });
+          salvos.push({ ...registro, faltantes: esc.faltantes });
+        }
+
+        return {
+          gerados: salvos,
+          contexto: ctx,
+        };
       }),
 
     create: protectedProcedure

@@ -143,6 +143,25 @@ export type EscoreClinico = typeof escoresClinicos.$inferSelect;
 export type InsertEscoreClinico = typeof escoresClinicos.$inferInsert;
 
 /**
+ * Catálogo de escores - módulos registrados (inclui escores criados via IA)
+ */
+export const escoreModulos = mysqlTable("escoreModulos", {
+  id: int("id").autoincrement().primaryKey(),
+  nome: varchar("nome", { length: 255 }).notNull(),
+  descricao: text("descricao"),
+  categoria: varchar("categoria", { length: 120 }),
+  parametrosNecessarios: json("parametrosNecessarios"),
+  referencia: text("referencia"),
+  faixasInterpretacao: json("faixasInterpretacao"),
+  criadoViaIA: boolean("criadoViaIA").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EscoreModulo = typeof escoreModulos.$inferSelect;
+export type InsertEscoreModulo = typeof escoreModulos.$inferInsert;
+
+/**
  * Planos Terapêuticos - Planos de tratamento
  */
 export const planosTerapeuticos = mysqlTable("planosTerapeuticos", {
