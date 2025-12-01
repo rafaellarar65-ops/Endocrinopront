@@ -67,6 +67,8 @@ export default function ConsultaDetalhesV2() {
   const [assinaturaDocumento, setAssinaturaDocumento] = useState<"digital" | "manual">("digital");
   const [mostrarTabelaEditavel, setMostrarTabelaEditavel] = useState(false);
   const [mostrarGraficosExames, setMostrarGraficosExames] = useState(false);
+  const [ptsConteudo, setPtsConteudo] = useState("");
+  const [ptsDocumentoId, setPtsDocumentoId] = useState<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -215,6 +217,27 @@ export default function ConsultaDetalhesV2() {
     },
     onError: (error) => {
       toast.error("Erro ao gerar resumo: " + error.message);
+    },
+  });
+
+  const gerarPtsMutation = trpc.ia.gerarPTS.useMutation({
+    onSuccess: (data) => {
+      setPtsConteudo(data.conteudo || "");
+      setPtsDocumentoId(data.documentoId || null);
+      toast.success("PTS gerado em rascunho. Revise e salve antes de compartilhar.");
+    },
+    onError: (error) => {
+      toast.error("Erro ao gerar PTS: " + error.message);
+    },
+  });
+
+  const salvarPtsMutation = trpc.documentos.create.useMutation({
+    onSuccess: () => {
+      toast.success("PTS salvo como documento em rascunho.");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("Erro ao salvar PTS: " + error.message);
     },
   });
 
@@ -677,6 +700,23 @@ export default function ConsultaDetalhesV2() {
     });
   };
 
+  const handleGerarPTS = async () => {
+    if (!consulta) return;
+    setPtsConteudo("");
+    await gerarPtsMutation.mutateAsync({ consultaId });
+  };
+
+  const handleSalvarPTS = async () => {
+    if (!consulta || !paciente) return;
+    await salvarPtsMutation.mutateAsync({
+      pacienteId: consulta.pacienteId,
+      consultaId: consulta.id,
+      tipo: "pts",
+      titulo: "Plano Terapêutico Singular",
+      conteudoHTML: ptsConteudo,
+    });
+  };
+
   // Loading e auth
   if (authLoading || isLoading) {
     return (
@@ -706,7 +746,7 @@ export default function ConsultaDetalhesV2() {
   const abas = [
     { id: "hma", label: "HMA", icon: FileText },
     { id: "exame-fisico", label: "EXAME FÍSICO", icon: Stethoscope },
-    { id: "hipoteses", label: "HIPÓTESES", icon: Brain },
+    { id: "seguimento", label: "SEGUIMENTO", icon: Brain },
     { id: "resumo", label: "RESUMO", icon: Activity },
     { id: "perfil-met", label: "PERFIL MET", icon: Activity },
     { id: "exames", label: "EXAMES", icon: FileText },
@@ -998,9 +1038,9 @@ export default function ConsultaDetalhesV2() {
             </div>
           )}
 
-          {abaAtiva === "hipoteses" && (
+          {abaAtiva === "seguimento" && (
             <div className={isReadOnly ? "pointer-events-none opacity-60" : ""}>
-              <AbaHipotesesConduta consultaId={consultaId} />
+              <AbaHipotesesConduta consultaId={consultaId} readOnly={isReadOnly} />
             </div>
           )}
 
@@ -1397,6 +1437,61 @@ export default function ConsultaDetalhesV2() {
                   <span className="text-xs text-gray-500">
                     Escolha se o documento será emitido com assinatura digital ou para impressão manual.
                   </span>
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-dashed border-gray-200 p-4 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-sm">Plano Terapêutico Singular (PTS)</h3>
+                      <p className="text-xs text-gray-600">
+                        Gere o PTS com a IA Mestra, edite e salve como documento do paciente.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleGerarPTS}
+                        disabled={gerarPtsMutation.isPending || isReadOnly}
+                      >
+                        {gerarPtsMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4 mr-2" /> Gerar PTS (IA)
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        onClick={handleSalvarPTS}
+                        disabled={salvarPtsMutation.isPending || !ptsConteudo || isReadOnly}
+                      >
+                        {salvarPtsMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando
+                          </>
+                        ) : (
+                          "Salvar PTS"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  <Textarea
+                    rows={10}
+                    placeholder="O PTS gerado pela IA aparecerá aqui para revisão e ajustes."
+                    value={ptsConteudo}
+                    onChange={(e) => setPtsConteudo(e.target.value)}
+                    disabled={isReadOnly}
+                  />
+                  {ptsDocumentoId && (
+                    <p className="text-xs text-green-700">Documento salvo em rascunho (ID #{ptsDocumentoId}).</p>
+                  )}
                 </div>
                 {/* Grid de Botões de Documentos */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

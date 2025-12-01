@@ -216,7 +216,15 @@ export const documentos = mysqlTable("documentos", {
   pacienteId: int("pacienteId").notNull(),
   consultaId: int("consultaId"),
   medicoId: int("medicoId").notNull(),
-  tipo: mysqlEnum("tipo", ["receituario", "atestado", "declaracao", "relatorio", "encaminhamento", "laudo"]).notNull(),
+  tipo: mysqlEnum("tipo", [
+    "receituario",
+    "atestado",
+    "declaracao",
+    "relatorio",
+    "encaminhamento",
+    "laudo",
+    "pts",
+  ]).notNull(),
   titulo: varchar("titulo", { length: 255 }).notNull(),
   conteudoHTML: text("conteudoHTML"), // Conteúdo em HTML/Markdown
   pdfPath: varchar("pdfPath", { length: 500 }),

@@ -1560,7 +1560,7 @@ REGRAS ADICIONAIS:
       .input(z.object({
         pacienteId: z.number(),
         consultaId: z.number().optional(),
-        tipo: z.enum(["atestado", "declaracao", "relatorio", "encaminhamento", "laudo"]),
+        tipo: z.enum(["atestado", "declaracao", "relatorio", "encaminhamento", "laudo", "pts"]),
         titulo: z.string(),
         conteudoHTML: z.string().optional(),
       }))
@@ -1579,6 +1579,7 @@ REGRAS ADICIONAIS:
         pdfPath: z.string().optional(),
         pdfUrl: z.string().optional(),
         status: z.enum(["rascunho", "finalizado"]).optional(),
+        tipo: z.enum(["atestado", "declaracao", "relatorio", "encaminhamento", "laudo", "receituario", "pts"]).optional(),
       }))
       .mutation(async ({ input }) => {
         const { id, ...data } = input;
@@ -1693,6 +1694,66 @@ REGRAS ADICIONAIS:
           console.error('[IA] Erro ao processar exame laboratorial:', error);
           throw new Error('Erro ao processar exame laboratorial com IA');
         }
+      }),
+
+    gerarPTS: protectedProcedure
+      .input(z.object({ consultaId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const consulta = await db.getConsultaById(input.consultaId);
+        if (!consulta) {
+          throw new Error("Consulta não encontrada");
+        }
+
+        const paciente = await db.getPacienteById(consulta.pacienteId);
+        const promptBase = `${
+          `PROMPT – IA MESTRA DO MÓDULO DE MEV E PLANO TERAPÊUTICO SINGULAR\n` +
+          `Você é a IA Mestra do sistema de prontuário inteligente do Dr. Rafael Lara.\n` +
+          `Sua função é interpretar dados clínicos, selecionar ferramentas de MEV e gerar um Plano Terapêutico Singular (PTS) claro para o paciente.\n` +
+          `Siga o layout: Diagnósticos em linguagem simples; Tratamentos instituídos (medicações, doses); Recomendações de alimentação, exercício, sono, estresse, substâncias; Ferramentas de MEV selecionadas (com grau de indicação e forma de aplicar); Pontos a melhorar; Metas de curto e médio prazo (mensuráveis); Orientações diárias personalizadas; Checklist de adesão; Cronograma de seguimento (retorno, exames a repetir, sinais de alarme).\n` +
+          `Escreva com frases curtas, empatia e sem jargões. O médico poderá editar antes de imprimir.\n`
+        }`;
+
+        const dadosConsulta = {
+          paciente: {
+            nome: paciente?.nome,
+            idade: paciente?.dataNascimento
+              ? Math.max(
+                  0,
+                  new Date().getFullYear() - new Date(paciente.dataNascimento).getFullYear()
+                )
+              : undefined,
+            sexo: paciente?.sexo,
+          },
+          anamnese: consulta.anamnese,
+          exameFisico: consulta.exameFisico,
+          exames: consulta.examesLaboratoriais,
+          bioimpedancia: consulta.bioimpedancia,
+          resumo: consulta.resumo,
+          metas: consulta.observacoes,
+          conduta: consulta.conduta,
+          hipoteses: consulta.hipotesesDiagnosticas,
+        };
+
+        const prompt = `${promptBase}\nDados estruturados da consulta:\n${JSON.stringify(
+          dadosConsulta,
+          null,
+          2
+        )}`;
+
+        const llmResponse = await invokeLLM({ messages: [{ role: "user", content: prompt }] });
+        const conteudo = llmResponse.content || "";
+
+        const documento = await db.createDocumento({
+          pacienteId: consulta.pacienteId,
+          consultaId: consulta.id,
+          medicoId: ctx.user.id,
+          tipo: "pts",
+          titulo: "Plano Terapêutico Singular",
+          conteudoHTML: conteudo,
+          status: "rascunho",
+        });
+
+        return { success: true, conteudo, documentoId: documento.id };
       }),
   }),
 
@@ -1987,7 +2048,7 @@ Quando "tipo" for "exame_especifico", descreva claramente qual teste/avaliação
         z.object({
           consultaId: z.number(),
           pacienteId: z.number(),
-          tipo: z.enum(["receituario", "atestado", "relatorio", "declaracao", "encaminhamento", "laudo"]),
+          tipo: z.enum(["receituario", "atestado", "relatorio", "declaracao", "encaminhamento", "laudo", "pts"]),
           titulo: z.string().min(1),
           pdfUrl: z.string().min(1),
           pdfPath: z.string().min(1),
