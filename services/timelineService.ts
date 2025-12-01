@@ -19,6 +19,7 @@ export class TimelineService {
     const consultas = await db.getConsultasByPaciente(pacienteId);
     consultas.forEach((consulta) => {
       const conduta = consulta.conduta?.toLowerCase() || "";
+      // Lógica avançada para detectar marcos clínicos importantes
       const isMarco = /inicia|introduz|suspende|alta/.test(conduta);
       const isAjuste = /aumenta|reduz|ajusta/.test(conduta);
 
@@ -45,6 +46,7 @@ export class TimelineService {
     const exames = await db.getExamesByPaciente(pacienteId);
     exames.forEach((exame) => {
       const resultados = Array.isArray(exame.resultados) ? exame.resultados : [];
+      // Conta quantos resultados foram marcados como críticos pela IA ou manualmente
       const criticos = resultados.filter((resultado: any) => resultado.status === "critico").length;
 
       eventos.push({
@@ -73,6 +75,7 @@ export class TimelineService {
       });
     });
 
+    // Ordenação cronológica decrescente (mais recente primeiro)
     return eventos.sort((a, b) => b.data.getTime() - a.data.getTime());
   }
 }
