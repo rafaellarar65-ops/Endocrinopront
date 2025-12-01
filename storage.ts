@@ -1,13 +1,12 @@
-/**
- * Implementação simplificada de armazenamento para ambientes de teste
- */
+export interface StoragePutResult {
+  url: string;
+  key?: string;
+}
+
 export async function storagePut(
   key: string,
-  data: Buffer | string,
-  contentType?: string
-): Promise<{ url: string; contentType?: string }> {
-  return {
-    url: `https://storage.local/${key}`,
-    contentType,
-  };
+  _content: Buffer | string,
+  _contentType: string
+): Promise<StoragePutResult> {
+  return { url: `https://storage.local/${key}`, key };
 }
