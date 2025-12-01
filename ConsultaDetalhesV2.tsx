@@ -9,7 +9,6 @@ import { AbaPerfilMetabolico } from "@/components/consulta/AbaPerfilMetabolico";
 import { ModalNovaPrescricao } from "@/components/prescricoes/ModalNovaPrescricao";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft, 
@@ -122,11 +121,6 @@ export default function ConsultaDetalhesV2() {
 
   const { data: paciente } = trpc.pacientes.getById.useQuery(
     { id: consulta?.pacienteId || 0 },
-    { enabled: isAuthenticated && !!consulta?.pacienteId }
-  );
-
-  const { data: consultasRecentes } = trpc.consultas.getByPaciente.useQuery(
-    { pacienteId: consulta?.pacienteId || 0 },
     { enabled: isAuthenticated && !!consulta?.pacienteId }
   );
 
