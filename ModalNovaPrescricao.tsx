@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Loader2, Sparkles, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Loader2, Sparkles, AlertTriangle, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -55,7 +55,9 @@ export function ModalNovaPrescricao({
 
   const [diagnostico, setDiagnostico] = useState("");
   const [loadingSugestao, setLoadingSugestao] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
   const [interacoes, setInteracoes] = useState<any[]>([]);
+  const { data: paciente } = trpc.pacientes.getById.useQuery({ id: pacienteId });
 
   // Pré-popular diagnóstico quando o modal abre
   useEffect(() => {
@@ -251,6 +253,77 @@ export function ModalNovaPrescricao({
     });
   };
 
+  const handleGerarPdf = async () => {
+    const itensValidos = itens.filter(
+      (item) =>
+        item.medicamentoTextoLivre.trim() &&
+        item.dosagem.trim() &&
+        item.frequencia.trim() &&
+        item.duracao.trim()
+    );
+
+    if (itensValidos.length === 0) {
+      toast({
+        title: "Atenção",
+        description: "Adicione pelo menos um medicamento completo para gerar o PDF",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!paciente?.nome) {
+      toast({
+        title: "Erro",
+        description: "Dados do paciente não encontrados para gerar o PDF",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setGerandoPdf(true);
+    try {
+      const { gerarPrescricaoPdf } = await import("./lib/prescricaoPdfService");
+
+      const resultado = await gerarPrescricaoPdf({
+        pacienteNome: paciente.nome,
+        data: dataPrescricao,
+        assinaturaTipo: "digital",
+        observacoes: observacoes.trim() || undefined,
+        itens: itensValidos.map((item) => ({
+          nome: item.medicamentoTextoLivre,
+          dosagem: item.dosagem,
+          frequencia: item.frequencia,
+          duracao: item.duracao,
+          orientacoes: item.orientacoes,
+        })),
+      });
+
+      const pdfBytes =
+        resultado.pdfBuffer instanceof Uint8Array
+          ? resultado.pdfBuffer
+          : new Uint8Array(resultado.pdfBuffer);
+      const url = URL.createObjectURL(new Blob([pdfBytes], { type: "application/pdf" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = resultado.fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "PDF gerado",
+        description: "Download concluído com sucesso",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao gerar PDF",
+        description: error.message ?? "Não foi possível gerar o documento",
+        variant: "destructive",
+      });
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -441,6 +514,23 @@ export function ModalNovaPrescricao({
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>
             Cancelar
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleGerarPdf}
+            disabled={gerandoPdf || criarMutation.isPending}
+          >
+            {gerandoPdf ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Gerando PDF...
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4 mr-2" />
+                Gerar PDF
+              </>
+            )}
           </Button>
           <Button
             onClick={handleSubmit}

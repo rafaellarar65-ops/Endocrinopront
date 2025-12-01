@@ -21,3 +21,18 @@ export interface EscoreSugestao {
   prioridade: "alta" | "media" | "baixa";
   guidelineReferencia?: string; // ACC/AHA tal, KDIGO tal, etc.
 }
+
+export interface SolicitacaoExameItem {
+  nome: string;
+  justificativa?: string;
+  orientacoes?: string;
+}
+
+export interface SolicitacaoExamesPayload {
+  consultaId?: number;
+  paciente?: { id?: number; nome?: string };
+  medico?: { nome?: string; crm?: string };
+  data?: string;
+  itens: SolicitacaoExameItem[];
+  observacoes?: string;
+}
