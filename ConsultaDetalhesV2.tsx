@@ -295,6 +295,12 @@ export default function ConsultaDetalhesV2() {
     onError: (error) => toast.error("Erro ao remover exame: " + error.message),
   });
 
+  const gerarResumoEvolutivoMutation = trpc.consultas.gerarResumoEvolutivo.useMutation({
+    onError: (error) => {
+      toast.error("Erro ao gerar resumo evolutivo: " + error.message);
+    },
+  });
+
   const processarExameLabMutation = trpc.ia.processarExameLab.useMutation({
     onMutate: () => setIsProcessandoExame(true),
     onSuccess: (result) => {
@@ -637,6 +643,7 @@ export default function ConsultaDetalhesV2() {
     setIsFinalizando(true);
 
     try {
+      await gerarResumoEvolutivoMutation.mutateAsync({ consultaId });
       await updateConsultaMutation.mutateAsync({
         id: consultaId,
         status: "concluida" as const,
@@ -788,16 +795,16 @@ export default function ConsultaDetalhesV2() {
           </div>
           <div className="flex items-center gap-4">
             <CronometroConsulta inicioConsulta={consulta.status === "em_andamento" ? consulta.dataHora.toString() : null} />
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleFinalizarConsulta}
-              disabled={isFinalizando || isReadOnly}
-            >
-              {isFinalizando ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Finalizando...
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleFinalizarConsulta}
+              disabled={isFinalizando || isReadOnly || gerarResumoEvolutivoMutation.isPending}
+              >
+                {isFinalizando ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Finalizando...
                 </>
               ) : (
                 "FINALIZAR"
