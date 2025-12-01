@@ -8,9 +8,21 @@
 - [ ] Revisar seção de áudios do paciente para listar duração e data/hora da gravação e permitir download por consulta.
 
 ## Pendências em foco (prioridade média)
-- [ ] Planos terapêuticos: versões médico/paciente, editor HTML/Markdown, templates por condição, envio por WhatsApp/Email com registro de leitura, histórico de planos anteriores.
-- [ ] Timeline de evolução (Módulo 19): consolidar consultas, exames e BIA; notas SOAP estruturadas; marcos automáticos (início/ajuste de medicação, eventos adversos); filtros por período e tipo; comparação entre consultas e análise longitudinal.
-- [ ] Dashboard metabólico completo: consolidar BIA + exames + escores, velocímetros de risco, mini-infográficos, alertas automáticos de valores críticos, tendências e previsões, comparação com população de referência.
+- [ ] Planos terapêuticos
+  - [ ] Versão médico (detalhada com raciocínio clínico) e versão paciente (linguagem acessível)
+  - [ ] Editor HTML/Markdown com blocos pré-formatados e histórico de versões
+  - [ ] Templates reutilizáveis por condição clínica e placeholders dinâmicos
+  - [ ] Envio automático por WhatsApp/Email com registro de leitura
+  - [ ] Histórico de planos anteriores e auditoria de alterações
+- [ ] Timeline de evolução (Módulo 19)
+  - [ ] Linha do tempo consolidada (consultas + exames + BIA) com notas SOAP estruturadas
+  - [ ] Marcos clínicos automáticos (início/ajuste de medicação, eventos adversos)
+  - [ ] Gráficos resumidos de parâmetros críticos e filtros por período/tipo de evento
+  - [ ] Comparação entre consultas e análise longitudinal com deltas de parâmetros
+- [ ] Dashboard metabólico completo
+  - [ ] Consolidação avançada (BIA + exames + escores) em painel único
+  - [ ] Velocímetros de risco, mini-infográficos e alertas de valores críticos
+  - [ ] Tendências, previsões e comparação com população de referência
 
 ## Fase 1: Arquitetura e Planejamento
 - [x] Analisar requisitos completos do sistema
