@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Brain, Sparkles, FileText, CheckCircle, AlertCircle } from "lucide-react";
-import { Streamdown } from "streamdown";
 
 interface AbaResumoEvolutivoProps {
   consultaId: number;
@@ -163,7 +162,7 @@ export function AbaResumoEvolutivo({ consultaId }: AbaResumoEvolutivoProps) {
                 <h3 className="font-semibold text-lg text-blue-900">Resumo Consolidado</h3>
               </div>
               <div className="prose prose-sm max-w-none text-gray-800">
-                <Streamdown>{resumoData.resumoEvolutivo}</Streamdown>
+                <p className="whitespace-pre-wrap leading-relaxed">{resumoData.resumoEvolutivo}</p>
               </div>
             </div>
 
